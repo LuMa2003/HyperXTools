@@ -1,5 +1,4 @@
-// Uncomment for release builds to hide console window:
-// #![windows_subsystem = "windows"]
+#![windows_subsystem = "windows"]
 
 mod audio;
 mod config;
@@ -7,47 +6,102 @@ mod hid;
 mod icon;
 mod tray;
 
+use hid::HeadsetEvent;
+use std::thread;
+use windows::Win32::Foundation::*;
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+/// Wrapper to send HWND across thread boundaries.
+/// SAFETY: HWND is a numeric handle; PostMessageW is explicitly thread-safe.
+struct SendHwnd(HWND);
+unsafe impl Send for SendHwnd {}
+
 fn main() {
-    println!("HyperXTools — HID report logger");
-    println!("Searching for HyperX dongle...\n");
+    let tray = Box::new(tray::TrayIcon::new().expect("Failed to create tray icon"));
+    let hwnd = tray.hwnd();
+
+    // Leak TrayIcon into a raw pointer for wndproc access via GWLP_USERDATA
+    let tray_ptr = Box::into_raw(tray);
+    unsafe {
+        SetWindowLongPtrW((*tray_ptr).hwnd(), GWLP_USERDATA, tray_ptr as isize);
+    }
+
+    // Spawn background HID communication thread
+    let send_hwnd = SendHwnd(hwnd);
+    thread::spawn(move || hid_thread(send_hwnd));
+
+    // Win32 message loop — drives the entire application
+    unsafe {
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            DispatchMessageW(&msg);
+        }
+
+        // Retake ownership so TrayIcon::drop runs (removes tray icon)
+        let _ = Box::from_raw(tray_ptr);
+    }
+}
+
+/// Background thread: discovers the HyperX dongle and relays HID events to the tray window.
+fn hid_thread(send_hwnd: SendHwnd) {
+    let hwnd = send_hwnd.0;
 
     let device = match hid::find_dongle() {
         Some(d) => d,
-        None => {
-            eprintln!("No HyperX dongle found!");
-            eprintln!("Make sure the dongle is plugged in and NGENUITY is closed.");
-            eprintln!("\nPress Enter to exit...");
-            let _ = std::io::stdin().read_line(&mut String::new());
-            return;
-        }
+        None => return, // No dongle; tray stays in "disconnected" state
     };
 
-    println!("\nListening for HID reports (press Ctrl+C to stop)...\n");
+    // Request initial state
+    device.request_connection();
+    device.request_battery();
+    device.request_charging();
 
-    loop {
-        if let Some((n, buf)) = device.read_raw(5000) {
-            // Print first 8 bytes as hex (only first 4 carry data, but show a few extra)
-            print!("[{n:>2} bytes] ");
-            for b in &buf[..8] {
-                print!("{b:02X} ");
-            }
-
-            // Try to parse as a known event
-            if buf[0] == 0x21 && buf[1] == 0xBB {
-                let state = if buf[3] == 0x01 { "MUTED" } else { "UNMUTED" };
-                print!(" -> Mute: {state}");
-            } else if buf[0] == 0x65 {
-                let state = if buf[1] == 0x04 { "MUTED" } else { "UNMUTED" };
-                print!(" -> Mute (Flight): {state}");
-            } else if buf[0] == 0x21 && buf[1] == 0xFF {
-                let pct = buf[2];
-                let charging = if buf[3] != 0 { "charging" } else { "discharging" };
-                print!(" -> Battery: {pct}% ({charging})");
-            } else {
-                print!(" -> Unknown");
-            }
-
-            println!();
+    // Drain startup responses (up to 1.5 seconds)
+    let drain_start = std::time::Instant::now();
+    while drain_start.elapsed() < std::time::Duration::from_millis(1500) {
+        if let Some(event) = device.read_event(500) {
+            post_event(hwnd, &event);
         }
+    }
+
+    // Passive event loop — relay dongle reports to the tray window
+    loop {
+        if let Some(event) = device.read_event(5000) {
+            // On reconnection, re-request battery info
+            if matches!(&event, HeadsetEvent::Connection(true)) {
+                device.request_battery();
+                device.request_charging();
+            }
+            post_event(hwnd, &event);
+        }
+    }
+}
+
+/// Maps a HeadsetEvent to a PostMessageW call targeting the tray window.
+fn post_event(hwnd: HWND, event: &HeadsetEvent) {
+    unsafe {
+        let _ = match event {
+            HeadsetEvent::Battery(status) => PostMessageW(
+                Some(hwnd),
+                tray::WM_HID_BATTERY,
+                WPARAM(status.percent as usize),
+                LPARAM(status.charging as isize),
+            ),
+            HeadsetEvent::Mute(state) => {
+                let muted = matches!(state, hid::MuteState::Muted);
+                PostMessageW(
+                    Some(hwnd),
+                    tray::WM_HID_MUTE,
+                    WPARAM(muted as usize),
+                    LPARAM(0),
+                )
+            }
+            HeadsetEvent::Connection(connected) => PostMessageW(
+                Some(hwnd),
+                tray::WM_HID_CONNECTION,
+                WPARAM(*connected as usize),
+                LPARAM(0),
+            ),
+        };
     }
 }
