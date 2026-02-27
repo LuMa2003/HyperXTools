@@ -106,7 +106,7 @@ Response codes are either the same as the request command (direct reply) or a hi
 | Sidetone on/off | `0x05` | `0x05` | — | `0x00` = off, `0x01` = on |
 | Sidetone volume | `0x06` | `0x06` | — | Volume level (observed `FF FC` = max/unset) |
 | Auto shutdown | `0x07` | `0x07` | — | Minutes (e.g., `0x0A` = 10 min) |
-| Mic connected | `0x08` | `0x08` | — | `0x00` = no, `0x01` = yes |
+| Mic connected | `0x08` | `0x08` | `0x20` | `0x00` = no (removed), `0x01` = yes (inserted) |
 | Voice prompts | `0x09` | `0x09` | — | `0x00` = off, `0x01` = on |
 | Mute state | `0x0A` | `0x0A` | `0x23` | `0x00` = unmuted, `0x01` = muted |
 | Battery level | `0x0B` | `0x0B` | `0x25` | Byte 3 = percent (0–100). Bytes 4–5 = voltage in mV (u16 BE, e.g., `0F AE` = 4014 mV). Byte 6 = cell count (`0x01`) |

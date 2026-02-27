@@ -19,6 +19,10 @@ features = [
     "Win32_System_LibraryLoader",
 ]
 
+[[bin]]
+name = "hid_logger"
+path = "src/bin/hid_logger.rs"
+
 [profile.release]
 lto = true
 strip = true
