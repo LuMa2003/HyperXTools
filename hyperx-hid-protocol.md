@@ -88,28 +88,47 @@ Command category `0x21`, command type `0xBB`, with the state in byte 3.
 
 The dongle sends a report **only when the mute button is pressed** — there is no periodic polling needed. Open the HID device, block on read, and you'll receive a report the instant the user presses the button. This makes detection effectively zero-latency.
 
-## Other Known Commands
+## Request-Response Protocol
 
-These were decoded by the community via Wireshark captures and NGENUITY decompilation:
-
-### Mic Monitoring (Sidetone)
-
-Controls whether the headset plays your own mic audio back to you through the speakers.
+The dongle supports a command-response pattern. To query a value, send an **output report** (via `hid_write()`) with the command byte, and the dongle responds with an **input report** containing the result. All commands use the same envelope:
 
 ```
-On:  [0x21, 0xBB, 0x10, 0x01]
-Off: [0x21, 0xBB, 0x10, 0x00]
+Request:  [0x21, 0xBB, CMD,  0x00, 0x00, ...]  (zero-padded to report size)
+Response: [0x21, 0xBB, RESP, DATA, 0x00, ...]
 ```
+
+Response codes are either the same as the request command (direct reply) or a higher "push" code for unsolicited notifications:
+
+| Purpose | Request CMD | Direct Reply | Push Code | Data (byte 3+) |
+|---------|-------------|-------------|-----------|----------------|
+| Connection status | `0x03` | `0x03` | `0x24` | `0x01` = disconnected, `0x02` = connected |
+| Pairing info | `0x04` | `0x04` | — | Device ID bytes (e.g., `C8 5A CF 59 ED`) |
+| Sidetone on/off | `0x05` | `0x05` | — | `0x00` = off, `0x01` = on |
+| Sidetone volume | `0x06` | `0x06` | — | Volume level (observed `FF FC` = max/unset) |
+| Auto shutdown | `0x07` | `0x07` | — | Minutes (e.g., `0x0A` = 10 min) |
+| Mic connected | `0x08` | `0x08` | — | `0x00` = no, `0x01` = yes |
+| Voice prompts | `0x09` | `0x09` | — | `0x00` = off, `0x01` = on |
+| Mute state | `0x0A` | `0x0A` | `0x23` | `0x00` = unmuted, `0x01` = muted |
+| Battery level | `0x0B` | `0x0B` | `0x25` | Byte 3 = percent (0–100). Bytes 4–5 = voltage in mV (u16 BE, e.g., `0F AE` = 4014 mV). Byte 6 = cell count (`0x01`) |
+| Charging state | `0x0C` | `0x0C` | `0x26` | `0x00` = not charging, `0x01` = charging |
+| Device info | `0x0D` | `0x0D` | — | Device ID bytes (e.g., `C8 5A CF 59 D9`) — related to pairing info |
+| Product color | `0x0E` | `0x0E` | — | Color variant (e.g., `0x02`) |
+
+### Set Commands
+
+| Purpose | CMD | Data (byte 3) |
+|---------|-----|----------------|
+| Set sidetone | `0x10` | `0x00` = off, `0x01` = on |
+| Set sidetone volume | `0x11` | Volume level |
+| Set auto shutdown | `0x12` | Minutes |
+| Set voice prompts | `0x13` | `0x00` = off, `0x01` = on |
+| Set mute | `0x15` | `0x00` = unmute, `0x01` = mute |
 
 ### Battery Level
 
-The dongle periodically reports battery level as an unsolicited HID input report. The exact format varies, but typically:
+To request battery, send `[0x21, 0xBB, 0x0B, 0x00, ...]` via `hid_write()` (output report, NOT feature report). The dongle responds with `[0x21, 0xBB, 0x0B, PERCENT, ...]` and may also send an unsolicited push `[0x21, 0xBB, 0x25, PERCENT, ...]`.
 
-```
-[0x21, 0xFF, BATTERY_PERCENT, CHARGING_STATE]
-```
-
-Where `BATTERY_PERCENT` is 0–100 and `CHARGING_STATE` indicates whether the headset is charging.
+Best practice: first send `0x03` (connection check), then `0x0C` (charging), then `0x0B` (battery).
 
 ### Volume Control
 
