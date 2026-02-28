@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use windows::Win32::System::Registry::*;
 
 /// Application settings persisted to disk.
 #[derive(Serialize, Deserialize)]
@@ -66,51 +65,4 @@ impl Config {
             let _ = std::fs::write(&path, contents);
         }
     }
-}
-
-/// Reads a DWORD value from the registry under `HKCU\<subkey>\<name>`.
-pub fn read_registry_dword(subkey: &str, name: &str) -> Option<u32> {
-    unsafe {
-        let mut hkey = HKEY::default();
-        let subkey_wide = to_wide(subkey);
-        let result = RegOpenKeyExW(
-            HKEY_CURRENT_USER,
-            to_pcwstr(&subkey_wide),
-            None,
-            KEY_READ,
-            &mut hkey,
-        );
-        if result.is_err() {
-            return None;
-        }
-
-        let name_wide = to_wide(name);
-        let mut data: u32 = 0;
-        let mut size = std::mem::size_of::<u32>() as u32;
-        let result = RegQueryValueExW(
-            hkey,
-            to_pcwstr(&name_wide),
-            None,
-            None,
-            Some(std::ptr::from_mut(&mut data).cast()),
-            Some(&mut size),
-        );
-        let _ = RegCloseKey(hkey);
-
-        if result.is_ok() {
-            Some(data)
-        } else {
-            None
-        }
-    }
-}
-
-fn to_wide(s: &str) -> Vec<u16> {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
-    OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
-}
-
-fn to_pcwstr(s: &[u16]) -> windows::core::PCWSTR {
-    windows::core::PCWSTR(s.as_ptr())
 }

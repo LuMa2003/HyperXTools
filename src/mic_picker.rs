@@ -20,12 +20,13 @@ const ID_LABEL: i32 = 103;
 struct PickerState {
     devices: Vec<AudioDevice>,
     selected: Option<AudioDevice>,
+    done: bool,
 }
 
 /// Shows a modal mic picker dialog. Returns the selected device, or `None` if cancelled.
 pub fn show_mic_picker() -> Option<AudioDevice> {
     debug_log!("[mic_picker] show_mic_picker() called");
-    audio::init_com();
+    let _com = audio::init_com();
     debug_log!("[mic_picker] COM initialized");
 
     let devices = audio::enumerate_input_devices();
@@ -186,6 +187,7 @@ pub fn show_mic_picker() -> Option<AudioDevice> {
         let state = Box::new(PickerState {
             devices,
             selected: None,
+            done: false,
         });
         let state_ptr = Box::into_raw(state);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
@@ -193,12 +195,23 @@ pub fn show_mic_picker() -> Option<AudioDevice> {
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = UpdateWindow(hwnd);
 
-        // Modal message loop
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+        // Modal message loop — uses a `done` flag instead of PostQuitMessage so that
+        // an external WM_QUIT (e.g. from tray Exit) is re-posted, not swallowed.
+        loop {
+            let mut msg = MSG::default();
+            let ret = GetMessageW(&mut msg, None, 0, 0);
+            if !ret.as_bool() {
+                // External WM_QUIT — re-post so the main loop can exit
+                PostQuitMessage(msg.wParam.0 as i32);
+                let _ = DestroyWindow(hwnd);
+                break;
+            }
             if !IsDialogMessageW(hwnd, &msg).as_bool() {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
+            }
+            if (*state_ptr).done {
+                break;
             }
         }
 
@@ -257,7 +270,9 @@ unsafe extern "system" fn picker_wndproc(
             }
         }
         WM_DESTROY => {
-            unsafe { PostQuitMessage(0) };
+            if !ptr.is_null() {
+                unsafe { (*ptr).done = true };
+            }
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },

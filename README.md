@@ -10,7 +10,7 @@ Should work for both Kingston (`0951:1743`) and HP (`03F0:098D`) branded dongles
 
 ## Installation
 
-Download the `.msi` installer from the [Releases](https://github.com/LuMa2003/HyperXTools/releases) page. The installer optionally configures mic switching and adds a Start Menu shortcut.
+Download the `.msi` installer from the [Releases](https://github.com/LuMa2003/HyperXTools/releases) page.
 
 ## Usage
 
@@ -57,6 +57,15 @@ Requires [WiX Toolset v3](https://wixtoolset.org/) and `cargo-wix`:
 cargo install cargo-wix
 cargo wix
 ```
+
+## TODO
+
+<details>
+<summary>Maybe</summary>
+
+- **Populate a WiX ListBox via custom action DLL** — Write a C/Rust DLL custom action that enumerates audio devices and fills a WiX ListBox property. This keeps everything inside the installer wizard but is significantly more work (separate DLL project, WiX custom action interface, etc.).
+
+</details>
 
 ## License
 
