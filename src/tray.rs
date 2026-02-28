@@ -184,26 +184,28 @@ impl TrayIcon {
             }
             ID_MIC_SWITCH => {
                 let enabling = !self.config.mic_switching;
-                self.config.mic_switching = enabling;
                 if enabling {
-                    // Mutual exclusivity: disable sync mute
-                    self.config.mic_mute_sync = false;
-                    // If no mic selected, show picker
+                    // If no mic selected, show picker first
                     if self.config.main_mic_id.is_none() {
-                        audio::init_com();
+                        let _com = audio::init_com();
                         if let Some(device) = mic_picker::show_mic_picker() {
                             self.config.main_mic_id = Some(device.id);
                             self.config.main_mic_name = Some(device.name);
                         } else {
-                            // User cancelled — disable mic switching
-                            self.config.mic_switching = false;
+                            // User cancelled — don't change any settings
+                            return;
                         }
                     }
+                    // Mutual exclusivity: disable sync mute
+                    self.config.mic_switching = true;
+                    self.config.mic_mute_sync = false;
+                } else {
+                    self.config.mic_switching = false;
                 }
                 self.config.save();
             }
             ID_MIC_SELECT => {
-                audio::init_com();
+                let _com = audio::init_com();
                 if let Some(device) = mic_picker::show_mic_picker() {
                     self.config.main_mic_id = Some(device.id);
                     self.config.main_mic_name = Some(device.name);
@@ -284,7 +286,7 @@ impl TrayIcon {
             if let Some(ref main_mic_id) = self.config.main_mic_id {
                 let mic_id = main_mic_id.clone();
                 std::thread::spawn(move || {
-                    audio::init_com();
+                    let _com = audio::init_com();
                     audio::switch_mic_on_mute(muted, &mic_id);
                 });
             }

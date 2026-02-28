@@ -33,7 +33,7 @@ fn main() {
     debug_log!("[main] args: {:?}", args);
     if args.iter().any(|a| a == "--select-mic") {
         debug_log!("[main] --select-mic mode");
-        audio::init_com();
+        let _com = audio::init_com();
         if let Some(device) = mic_picker::show_mic_picker() {
             debug_log!("[main] user selected: name={:?} id={:?}", device.name, device.id);
             let mut config = config::Config::load();
@@ -47,25 +47,8 @@ fn main() {
         return;
     }
 
-    // First-run detection: check installer registry flag
-    let mut config = config::Config::load();
+    let config = config::Config::load();
     debug_log!("[main] config loaded: mic_switching={}, main_mic_id={:?}", config.mic_switching, config.main_mic_id);
-    if config::read_registry_dword(r"Software\HyperXTools", "mic_switching") == Some(1)
-        && config.main_mic_id.is_none()
-    {
-        debug_log!("[main] first-run: registry flag set, no mic configured — showing picker");
-        audio::init_com();
-        config.mic_switching = true;
-        config.mic_mute_sync = false;
-        if let Some(device) = mic_picker::show_mic_picker() {
-            debug_log!("[main] first-run: user selected: name={:?} id={:?}", device.name, device.id);
-            config.main_mic_id = Some(device.id);
-            config.main_mic_name = Some(device.name);
-        } else {
-            debug_log!("[main] first-run: user cancelled mic picker");
-        }
-        config.save();
-    }
 
     let tray = Box::new(tray::TrayIcon::new(config).expect("Failed to create tray icon"));
     let hwnd = tray.hwnd();
