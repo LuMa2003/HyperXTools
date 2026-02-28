@@ -45,6 +45,9 @@
             Description='HyperXTools must be closed before installation can proceed.'
             />
 
+        <!-- Mic switching option: default checked -->
+        <Property Id='ENABLE_MIC_SWITCHING' Value='1'/>
+
         <Directory Id='TARGETDIR' Name='SourceDir'>
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
                 <Directory Id='APPLICATIONFOLDER' Name='HyperXTools'>
@@ -54,6 +57,16 @@
                             Name='hyperxtools.exe'
                             DiskId='1'
                             Source='$(var.CargoTargetBinDir)\hyperxtools.exe'
+                            KeyPath='yes'/>
+                    </Component>
+                    <Component Id='MicSwitchingRegistry' Guid='*'>
+                        <Condition>ENABLE_MIC_SWITCHING = "1"</Condition>
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\HyperXTools'
+                            Name='mic_switching'
+                            Type='integer'
+                            Value='1'
                             KeyPath='yes'/>
                     </Component>
                 </Directory>
@@ -91,11 +104,12 @@
             Absent='disallow'>
             <ComponentRef Id='MainExecutable'/>
             <ComponentRef Id='StartMenuShortcut'/>
+            <ComponentRef Id='MicSwitchingRegistry'/>
         </Feature>
 
         <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
 
-        <Property Id='ARPHELPLINK' Value='https://github.com/perlu/HyperXTools'/>
+        <Property Id='ARPHELPLINK' Value='https://github.com/LuMa2003/HyperXTools'/>
 
         <!-- Launch after install checkbox on the exit dialog -->
         <Property Id='WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT' Value='Launch HyperXTools'/>
@@ -108,8 +122,37 @@
 
         <UI>
             <UIRef Id='WixUI_InstallDir'/>
+
+            <!-- MicSwitchDlg: checkbox to enable mic switching -->
+            <Dialog Id='MicSwitchDlg' Width='370' Height='270' Title='!(loc.InstallDirDlg_Title)'>
+                <Control Id='BannerBitmap' Type='Bitmap' X='0' Y='0' Width='370' Height='44' TabSkip='no' Text='!(loc.InstallDirDlgBannerBitmap)'/>
+                <Control Id='BannerLine' Type='Line' X='0' Y='44' Width='370' Height='0'/>
+                <Control Id='BottomLine' Type='Line' X='0' Y='234' Width='370' Height='0'/>
+
+                <Control Id='Title' Type='Text' X='15' Y='6' Width='200' Height='15' Transparent='yes' NoPrefix='yes' Text='{\WixUI_Font_Title}Microphone Switching'/>
+                <Control Id='Description' Type='Text' X='25' Y='23' Width='280' Height='15' Transparent='yes' NoPrefix='yes' Text='Configure automatic microphone switching.'/>
+
+                <Control Id='EnableCheckBox' Type='CheckBox' X='25' Y='70' Width='330' Height='18' Property='ENABLE_MIC_SWITCHING' CheckBoxValue='1' Text='Enable automatic microphone switching'/>
+
+                <Control Id='Explanation' Type='Text' X='25' Y='100' Width='320' Height='40' NoPrefix='yes' Text='When your headset mic is muted, Windows switches to your main microphone. When unmuted, it switches back to the HyperX mic.'/>
+
+                <Control Id='Note' Type='Text' X='25' Y='150' Width='320' Height='25' NoPrefix='yes' Text='After installation, you will be prompted to select your main microphone.'/>
+
+                <Control Id='Back' Type='PushButton' X='180' Y='243' Width='56' Height='17' Text='!(loc.WixUIBack)'/>
+                <Control Id='Next' Type='PushButton' X='236' Y='243' Width='56' Height='17' Default='yes' Text='!(loc.WixUINext)'/>
+                <Control Id='Cancel' Type='PushButton' X='304' Y='243' Width='56' Height='17' Cancel='yes' Text='!(loc.WixUICancel)'>
+                    <Publish Event='SpawnDialog' Value='CancelDlg'>1</Publish>
+                </Control>
+            </Dialog>
+
+            <!-- Navigation: WelcomeDlg → InstallDirDlg → MicSwitchDlg → VerifyReadyDlg -->
             <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='InstallDirDlg' Order='99'>1</Publish>
             <Publish Dialog='InstallDirDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg' Order='99'>1</Publish>
+            <Publish Dialog='InstallDirDlg' Control='Next' Event='NewDialog' Value='MicSwitchDlg' Order='99'>1</Publish>
+            <Publish Dialog='MicSwitchDlg' Control='Back' Event='NewDialog' Value='InstallDirDlg'>1</Publish>
+            <Publish Dialog='MicSwitchDlg' Control='Next' Event='NewDialog' Value='VerifyReadyDlg'>1</Publish>
+            <Publish Dialog='VerifyReadyDlg' Control='Back' Event='NewDialog' Value='MicSwitchDlg' Order='99'>1</Publish>
+
             <Publish Dialog='ExitDialog' Control='Finish' Event='DoAction' Value='LaunchApplication'>WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
         </UI>
 

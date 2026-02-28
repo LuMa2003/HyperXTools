@@ -5,12 +5,14 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::{audio, autostart, icon};
+use crate::{audio, autostart, config, icon, mic_picker};
 
 // Menu item IDs
 const ID_SYNC_MUTE: u16 = 1001;
 const ID_EXIT: u16 = 1002;
 const ID_AUTOSTART: u16 = 1003;
+const ID_MIC_SWITCH: u16 = 1004;
+const ID_MIC_SELECT: u16 = 1005;
 
 // Custom window messages for HID thread → main thread communication
 pub const WM_HID_BATTERY: u32 = WM_APP + 1;
@@ -23,7 +25,7 @@ const WM_TRAY_CALLBACK: u32 = WM_APP + 100;
 /// Manages the system tray icon lifecycle and context menu.
 pub struct TrayIcon {
     hwnd: HWND,
-    mic_mute_sync: bool,
+    config: config::Config,
     battery_percent: Option<u8>,
     charging: bool,
     connected: bool,
@@ -32,7 +34,7 @@ pub struct TrayIcon {
 
 impl TrayIcon {
     /// Creates a new tray icon with a hidden message-only window.
-    pub fn new() -> Result<Self> {
+    pub fn new(config: config::Config) -> Result<Self> {
         unsafe {
             let instance = GetModuleHandleW(None)?;
             let class_name = w!("HyperXToolsTray");
@@ -78,7 +80,7 @@ impl TrayIcon {
 
             Ok(TrayIcon {
                 hwnd,
-                mic_mute_sync: true,
+                config,
                 battery_percent: None,
                 charging: false,
                 connected: false,
@@ -97,13 +99,55 @@ impl TrayIcon {
             let Ok(menu) = CreatePopupMenu() else {
                 return;
             };
-            let sync_flags = if self.mic_mute_sync {
+
+            // Sync Mute (F13)
+            let sync_flags = if self.config.mic_mute_sync {
                 MF_CHECKED
             } else {
                 MF_UNCHECKED
             };
-            let _ =
-                AppendMenuW(menu, MF_STRING | sync_flags, ID_SYNC_MUTE as usize, w!("Sync Mute"));
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING | sync_flags,
+                ID_SYNC_MUTE as usize,
+                w!("Sync Mute (F13)"),
+            );
+
+            // Mic Switching
+            let switch_flags = if self.config.mic_switching {
+                MF_CHECKED
+            } else {
+                MF_UNCHECKED
+            };
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING | switch_flags,
+                ID_MIC_SWITCH as usize,
+                w!("Mic Switching"),
+            );
+
+            // Main Mic selection
+            let mic_label = if let Some(ref name) = self.config.main_mic_name {
+                format!("Main Mic: {name}")
+            } else {
+                "Select Main Mic...".to_string()
+            };
+            let mic_wide: Vec<u16> = mic_label.encode_utf16().chain(std::iter::once(0)).collect();
+            let mic_grayed = if self.config.mic_switching {
+                MF_STRING
+            } else {
+                MF_STRING | MF_GRAYED
+            };
+            let _ = AppendMenuW(
+                menu,
+                mic_grayed,
+                ID_MIC_SELECT as usize,
+                windows::core::PCWSTR(mic_wide.as_ptr()),
+            );
+
+            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+
+            // Autostart
             let autostart_flags = if autostart::is_enabled() {
                 MF_CHECKED
             } else {
@@ -115,6 +159,7 @@ impl TrayIcon {
                 ID_AUTOSTART as usize,
                 w!("Start with Windows"),
             );
+
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
             let _ = AppendMenuW(menu, MF_STRING, ID_EXIT as usize, w!("Exit"));
 
@@ -129,7 +174,42 @@ impl TrayIcon {
 
     fn handle_menu_command(&mut self, id: u16) {
         match id {
-            ID_SYNC_MUTE => self.mic_mute_sync = !self.mic_mute_sync,
+            ID_SYNC_MUTE => {
+                self.config.mic_mute_sync = !self.config.mic_mute_sync;
+                if self.config.mic_mute_sync {
+                    // Mutual exclusivity: disable mic switching
+                    self.config.mic_switching = false;
+                }
+                self.config.save();
+            }
+            ID_MIC_SWITCH => {
+                let enabling = !self.config.mic_switching;
+                self.config.mic_switching = enabling;
+                if enabling {
+                    // Mutual exclusivity: disable sync mute
+                    self.config.mic_mute_sync = false;
+                    // If no mic selected, show picker
+                    if self.config.main_mic_id.is_none() {
+                        audio::init_com();
+                        if let Some(device) = mic_picker::show_mic_picker() {
+                            self.config.main_mic_id = Some(device.id);
+                            self.config.main_mic_name = Some(device.name);
+                        } else {
+                            // User cancelled — disable mic switching
+                            self.config.mic_switching = false;
+                        }
+                    }
+                }
+                self.config.save();
+            }
+            ID_MIC_SELECT => {
+                audio::init_com();
+                if let Some(device) = mic_picker::show_mic_picker() {
+                    self.config.main_mic_id = Some(device.id);
+                    self.config.main_mic_name = Some(device.name);
+                    self.config.save();
+                }
+            }
             ID_AUTOSTART => autostart::set_enabled(!autostart::is_enabled()),
             ID_EXIT => unsafe { PostQuitMessage(0) },
             _ => {}
@@ -199,8 +279,16 @@ impl TrayIcon {
     }
 
     /// Called when a mute toggle report arrives from the HID thread.
-    pub fn on_mute(&mut self, _muted: bool) {
-        if self.mic_mute_sync {
+    pub fn on_mute(&mut self, muted: bool) {
+        if self.config.mic_switching {
+            if let Some(ref main_mic_id) = self.config.main_mic_id {
+                let mic_id = main_mic_id.clone();
+                std::thread::spawn(move || {
+                    audio::init_com();
+                    audio::switch_mic_on_mute(muted, &mic_id);
+                });
+            }
+        } else if self.config.mic_mute_sync {
             audio::sync_mic_mute();
         }
     }
