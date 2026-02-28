@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod audio;
+mod autostart;
 mod config;
 mod hid;
 mod icon;

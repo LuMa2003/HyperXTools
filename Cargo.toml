@@ -3,6 +3,7 @@ name = "hyperxtools"
 version = "0.1.0"
 edition = "2024"
 description = "System tray app for HyperX Cloud Alpha Wireless headset control via HID"
+authors = ["Lucas Mårtensson"]
 license = "MIT"
 
 [dependencies]
@@ -17,6 +18,7 @@ features = [
     "Win32_Graphics_Gdi",
     "Win32_Foundation",
     "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
 ]
 
 [[bin]]
@@ -25,5 +27,4 @@ path = "src/bin/hid_logger.rs"
 
 [profile.release]
 lto = true
-strip = true
 opt-level = "s"

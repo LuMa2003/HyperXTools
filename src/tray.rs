@@ -5,11 +5,12 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::{audio, icon};
+use crate::{audio, autostart, icon};
 
 // Menu item IDs
 const ID_SYNC_MUTE: u16 = 1001;
 const ID_EXIT: u16 = 1002;
+const ID_AUTOSTART: u16 = 1003;
 
 // Custom window messages for HID thread → main thread communication
 pub const WM_HID_BATTERY: u32 = WM_APP + 1;
@@ -103,6 +104,17 @@ impl TrayIcon {
             };
             let _ =
                 AppendMenuW(menu, MF_STRING | sync_flags, ID_SYNC_MUTE as usize, w!("Sync Mute"));
+            let autostart_flags = if autostart::is_enabled() {
+                MF_CHECKED
+            } else {
+                MF_UNCHECKED
+            };
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING | autostart_flags,
+                ID_AUTOSTART as usize,
+                w!("Start with Windows"),
+            );
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
             let _ = AppendMenuW(menu, MF_STRING, ID_EXIT as usize, w!("Exit"));
 
@@ -118,6 +130,7 @@ impl TrayIcon {
     fn handle_menu_command(&mut self, id: u16) {
         match id {
             ID_SYNC_MUTE => self.mic_mute_sync = !self.mic_mute_sync,
+            ID_AUTOSTART => autostart::set_enabled(!autostart::is_enabled()),
             ID_EXIT => unsafe { PostQuitMessage(0) },
             _ => {}
         }
