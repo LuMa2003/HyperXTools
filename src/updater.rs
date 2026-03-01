@@ -47,8 +47,9 @@ struct DialogState {
 }
 
 /// Checks GitHub for a newer release.
-/// Returns `None` if up-to-date, skipped, or on any error (silent failure).
-pub fn check_for_update(skipped_version: Option<&str>) -> Option<UpdateInfo> {
+/// Returns `Ok(None)` if up-to-date or skipped, `Ok(Some(...))` if an update is available,
+/// or `Err(...)` on network/parse errors.
+pub fn check_for_update(skipped_version: Option<&str>) -> Result<Option<UpdateInfo>, String> {
     use std::time::Duration;
 
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -61,40 +62,56 @@ pub fn check_for_update(skipped_version: Option<&str>) -> Option<UpdateInfo> {
         .header("User-Agent", &format!("HyperXTools/{CURRENT_VERSION}"))
         .header("Accept", "application/vnd.github.v3+json")
         .call()
-        .ok()?;
+        .map_err(|e| format!("Network error: {e}"))?;
 
-    let body = resp.body_mut().read_to_string().ok()?;
-    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let body = resp
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| format!("Failed to read response: {e}"))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Invalid JSON: {e}"))?;
 
-    let tag = json["tag_name"].as_str()?;
+    let tag = json["tag_name"]
+        .as_str()
+        .ok_or("Missing tag_name in release")?;
     let version_str = tag.strip_prefix('v').unwrap_or(tag);
 
-    let remote: semver::Version = version_str.parse().ok()?;
-    let current: semver::Version = CURRENT_VERSION.parse().ok()?;
+    let remote: semver::Version = version_str
+        .parse()
+        .map_err(|e| format!("Invalid version '{version_str}': {e}"))?;
+    let current: semver::Version = CURRENT_VERSION
+        .parse()
+        .map_err(|e| format!("Invalid current version: {e}"))?;
 
     if remote <= current {
-        return None;
+        return Ok(None);
     }
 
     if let Some(skipped) = skipped_version
         && skipped == version_str
     {
-        return None;
+        return Ok(None);
     }
 
     let changelog = json["body"].as_str().unwrap_or("").to_string();
 
-    let assets = json["assets"].as_array()?;
+    let assets = json["assets"]
+        .as_array()
+        .ok_or("Missing assets in release")?;
     let exe_asset = assets
         .iter()
-        .find(|a| a["name"].as_str().is_some_and(|n| n.ends_with(".exe")))?;
-    let download_url = exe_asset["browser_download_url"].as_str()?.to_string();
+        .find(|a| a["name"].as_str().is_some_and(|n| n.ends_with(".exe")))
+        .ok_or("No .exe asset found in release")?;
+    let download_url = exe_asset["browser_download_url"]
+        .as_str()
+        .ok_or("Missing download URL for exe asset")?
+        .to_string();
 
-    Some(UpdateInfo {
+    Ok(Some(UpdateInfo {
         version: version_str.to_string(),
         changelog,
         download_url,
-    })
+    }))
 }
 
 /// Shows a modal update dialog. Returns the user's choice.
@@ -168,10 +185,15 @@ pub fn show_update_dialog(info: &UpdateInfo) -> UpdateChoice {
         }
 
         // Changelog (read-only multiline edit)
-        let cl = if info.changelog.len() > 500 {
-            format!("{}...", &info.changelog[..500])
-        } else {
-            info.changelog.clone()
+        let cl = {
+            const MAX_CHARS: usize = 500;
+            let mut chars = info.changelog.chars();
+            let truncated: String = chars.by_ref().take(MAX_CHARS).collect();
+            if chars.next().is_some() {
+                format!("{truncated}...")
+            } else {
+                truncated
+            }
         };
         let cl_crlf = cl.replace('\n', "\r\n");
         let cl_w: Vec<u16> = cl_crlf.encode_utf16().chain(std::iter::once(0)).collect();
@@ -405,8 +427,13 @@ pub fn download_and_replace(download_url: &str) -> Result<PathBuf, String> {
         Ok(()) => Ok(current_exe),
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
             // Need elevation (e.g. Program Files) — re-run with --replace-exe via runas
-            elevate_replace(&current_exe, &new_path, &old_path)?;
-            Ok(current_exe)
+            match elevate_replace(&current_exe, &new_path, &old_path) {
+                Ok(()) => Ok(current_exe),
+                Err(err) => {
+                    let _ = std::fs::remove_file(&new_path);
+                    Err(err)
+                }
+            }
         }
         Err(e) => {
             let _ = std::fs::remove_file(&new_path);
