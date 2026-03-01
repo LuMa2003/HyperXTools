@@ -119,7 +119,6 @@
         </UI>
 
         <Property Id='WIXUI_INSTALLDIR' Value='APPLICATIONFOLDER'/>
-        <WixVariable Id='WixUILicenseRtf' Value='wix\License.rtf'/>
 
     </Product>
 
