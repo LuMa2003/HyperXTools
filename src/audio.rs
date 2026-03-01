@@ -3,12 +3,12 @@
 use std::mem;
 
 use com_policy_config::{IPolicyConfig, PolicyConfigClient};
-use windows::core::PWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::PWSTR;
 
 /// A discovered audio input device.
 #[derive(Debug, Clone)]
@@ -56,11 +56,9 @@ pub fn enumerate_input_devices() -> Vec<AudioDevice> {
     unsafe {
         let mut devices = Vec::new();
 
-        let Ok(enumerator) = CoCreateInstance::<_, IMMDeviceEnumerator>(
-            &MMDeviceEnumerator,
-            None,
-            CLSCTX_ALL,
-        ) else {
+        let Ok(enumerator) =
+            CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
+        else {
             debug_log!("[audio] ERROR: failed to create IMMDeviceEnumerator");
             return devices;
         };
@@ -107,12 +105,20 @@ pub fn enumerate_input_devices() -> Vec<AudioDevice> {
                         }
                     }
                     Err(e) => {
-                        debug_log!("[audio] ERROR: GetValue(FriendlyName) failed for device {}: {:?}", i, e);
+                        debug_log!(
+                            "[audio] ERROR: GetValue(FriendlyName) failed for device {}: {:?}",
+                            i,
+                            e
+                        );
                         String::new()
                     }
                 },
                 Err(e) => {
-                    debug_log!("[audio] ERROR: OpenPropertyStore failed for device {}: {:?}", i, e);
+                    debug_log!(
+                        "[audio] ERROR: OpenPropertyStore failed for device {}: {:?}",
+                        i,
+                        e
+                    );
                     String::new()
                 }
             };
@@ -143,7 +149,9 @@ pub fn require_hyperx_device() -> String {
             unsafe {
                 MessageBoxW(
                     None,
-                    windows::core::w!("No HyperX headset found.\nMake sure the USB dongle is plugged in."),
+                    windows::core::w!(
+                        "No HyperX headset found.\nMake sure the USB dongle is plugged in."
+                    ),
                     windows::core::w!("HyperXTools"),
                     MB_OK | MB_ICONERROR,
                 );
@@ -159,11 +167,9 @@ pub fn set_default_endpoint(device_id: &str) {
         let wide: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
         let pcwstr = windows::core::PCWSTR(wide.as_ptr());
 
-        let Ok(policy_config) = CoCreateInstance::<_, IPolicyConfig>(
-            &PolicyConfigClient,
-            None,
-            CLSCTX_ALL,
-        ) else {
+        let Ok(policy_config) =
+            CoCreateInstance::<_, IPolicyConfig>(&PolicyConfigClient, None, CLSCTX_ALL)
+        else {
             return;
         };
 

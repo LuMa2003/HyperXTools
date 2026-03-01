@@ -16,6 +16,7 @@ mod hid;
 mod icon;
 mod mic_picker;
 mod tray;
+mod updater;
 
 use hid::HeadsetEvent;
 use std::thread;
@@ -28,14 +29,28 @@ struct SendHwnd(HWND);
 unsafe impl Send for SendHwnd {}
 
 fn main() {
-    // Handle --select-mic CLI arg: show picker, save config, exit
     let args: Vec<String> = std::env::args().collect();
     debug_log!("[main] args: {:?}", args);
+
+    // Handle --replace-exe CLI arg: elevated file swap for auto-update
+    if let Some(pos) = args.iter().position(|a| a == "--replace-exe") {
+        let remaining = &args[pos + 1..];
+        match updater::handle_replace_exe(remaining) {
+            Ok(()) => std::process::exit(0),
+            Err(_) => std::process::exit(1),
+        }
+    }
+
+    // Handle --select-mic CLI arg: show picker, save config, exit
     if args.iter().any(|a| a == "--select-mic") {
         debug_log!("[main] --select-mic mode");
         let _com = audio::init_com();
         if let Some(device) = mic_picker::show_mic_picker() {
-            debug_log!("[main] user selected: name={:?} id={:?}", device.name, device.id);
+            debug_log!(
+                "[main] user selected: name={:?} id={:?}",
+                device.name,
+                device.id
+            );
             let mut config = config::Config::load();
             config.main_mic_id = Some(device.id);
             config.main_mic_name = Some(device.name);
@@ -52,14 +67,20 @@ fn main() {
     let _com = audio::init_com();
 
     let config = config::Config::load();
-    debug_log!("[main] config loaded: mic_switching={}, main_mic_id={:?}", config.mic_switching, config.main_mic_id);
+    let skipped_version = config.skipped_version.clone();
+    debug_log!(
+        "[main] config loaded: mic_switching={}, main_mic_id={:?}",
+        config.mic_switching,
+        config.main_mic_id
+    );
 
     // Look up the HyperX audio device ID once at startup.
     // Exits with an error dialog if no HyperX dongle is found.
     let hyperx_mic_id = audio::require_hyperx_device();
     debug_log!("[main] hyperx_mic_id={:?}", hyperx_mic_id);
 
-    let tray = Box::new(tray::TrayIcon::new(config, hyperx_mic_id).expect("Failed to create tray icon"));
+    let tray =
+        Box::new(tray::TrayIcon::new(config, hyperx_mic_id).expect("Failed to create tray icon"));
     let hwnd = tray.hwnd();
 
     // Leak TrayIcon into a raw pointer for wndproc access via GWLP_USERDATA
@@ -71,6 +92,23 @@ fn main() {
     // Spawn background HID communication thread
     let send_hwnd = SendHwnd(hwnd);
     thread::spawn(move || hid_thread(send_hwnd));
+
+    // Spawn background update check (5-second delay to avoid slowing startup)
+    let update_hwnd = hwnd.0 as usize;
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_secs(5));
+        if let Some(info) = updater::check_for_update(skipped_version.as_deref()) {
+            let boxed = Box::new(info);
+            unsafe {
+                let _ = PostMessageW(
+                    Some(HWND(update_hwnd as *mut _)),
+                    tray::WM_UPDATE_AVAILABLE,
+                    WPARAM(0),
+                    LPARAM(Box::into_raw(boxed) as isize),
+                );
+            }
+        }
+    });
 
     // Win32 message loop — drives the entire application
     unsafe {
