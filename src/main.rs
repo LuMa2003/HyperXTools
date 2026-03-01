@@ -47,10 +47,19 @@ fn main() {
         return;
     }
 
+    // Initialize COM for the main thread — kept alive for the app's lifetime
+    // so that mic switching and the mic picker can use audio APIs directly.
+    let _com = audio::init_com();
+
     let config = config::Config::load();
     debug_log!("[main] config loaded: mic_switching={}, main_mic_id={:?}", config.mic_switching, config.main_mic_id);
 
-    let tray = Box::new(tray::TrayIcon::new(config).expect("Failed to create tray icon"));
+    // Look up the HyperX audio device ID once at startup.
+    // Exits with an error dialog if no HyperX dongle is found.
+    let hyperx_mic_id = audio::require_hyperx_device();
+    debug_log!("[main] hyperx_mic_id={:?}", hyperx_mic_id);
+
+    let tray = Box::new(tray::TrayIcon::new(config, hyperx_mic_id).expect("Failed to create tray icon"));
     let hwnd = tray.hwnd();
 
     // Leak TrayIcon into a raw pointer for wndproc access via GWLP_USERDATA

@@ -26,6 +26,8 @@ const WM_TRAY_CALLBACK: u32 = WM_APP + 100;
 pub struct TrayIcon {
     hwnd: HWND,
     config: config::Config,
+    /// Cached HyperX mic device ID, looked up once at startup.
+    hyperx_mic_id: String,
     battery_percent: Option<u8>,
     charging: bool,
     connected: bool,
@@ -34,7 +36,7 @@ pub struct TrayIcon {
 
 impl TrayIcon {
     /// Creates a new tray icon with a hidden message-only window.
-    pub fn new(config: config::Config) -> Result<Self> {
+    pub fn new(config: config::Config, hyperx_mic_id: String) -> Result<Self> {
         unsafe {
             let instance = GetModuleHandleW(None)?;
             let class_name = w!("HyperXToolsTray");
@@ -81,6 +83,7 @@ impl TrayIcon {
             Ok(TrayIcon {
                 hwnd,
                 config,
+                hyperx_mic_id,
                 battery_percent: None,
                 charging: false,
                 connected: false,
@@ -187,7 +190,6 @@ impl TrayIcon {
                 if enabling {
                     // If no mic selected, show picker first
                     if self.config.main_mic_id.is_none() {
-                        let _com = audio::init_com();
                         if let Some(device) = mic_picker::show_mic_picker() {
                             self.config.main_mic_id = Some(device.id);
                             self.config.main_mic_name = Some(device.name);
@@ -205,7 +207,6 @@ impl TrayIcon {
                 self.config.save();
             }
             ID_MIC_SELECT => {
-                let _com = audio::init_com();
                 if let Some(device) = mic_picker::show_mic_picker() {
                     self.config.main_mic_id = Some(device.id);
                     self.config.main_mic_name = Some(device.name);
@@ -284,11 +285,7 @@ impl TrayIcon {
     pub fn on_mute(&mut self, muted: bool) {
         if self.config.mic_switching {
             if let Some(ref main_mic_id) = self.config.main_mic_id {
-                let mic_id = main_mic_id.clone();
-                std::thread::spawn(move || {
-                    let _com = audio::init_com();
-                    audio::switch_mic_on_mute(muted, &mic_id);
-                });
+                audio::switch_mic_on_mute(muted, main_mic_id, &self.hyperx_mic_id);
             }
         } else if self.config.mic_mute_sync {
             audio::sync_mic_mute();

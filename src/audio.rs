@@ -8,7 +8,7 @@ use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::System::Com::STGM_READ;
+use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// A discovered audio input device.
 #[derive(Debug, Clone)]
@@ -134,6 +134,25 @@ pub fn find_hyperx_device_id() -> Option<String> {
         .map(|d| d.id)
 }
 
+/// Checks that a HyperX audio device exists. If not, shows an error dialog and exits.
+/// Returns the cached device ID on success. Caller must have initialized COM.
+pub fn require_hyperx_device() -> String {
+    match find_hyperx_device_id() {
+        Some(id) => id,
+        None => {
+            unsafe {
+                MessageBoxW(
+                    None,
+                    windows::core::w!("No HyperX headset found.\nMake sure the USB dongle is plugged in."),
+                    windows::core::w!("HyperXTools"),
+                    MB_OK | MB_ICONERROR,
+                );
+            }
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Sets the default audio endpoint for both Console and Communications roles.
 pub fn set_default_endpoint(device_id: &str) {
     unsafe {
@@ -153,24 +172,15 @@ pub fn set_default_endpoint(device_id: &str) {
     }
 }
 
-/// Core mic switching logic: swaps the default input device based on mute state.
+/// Switches the default mic based on mute state using cached device IDs.
 ///
 /// - `muted == true`  → switch to the user's main mic
 /// - `muted == false` → switch to the HyperX headset mic
-pub fn switch_mic_on_mute(muted: bool, main_mic_id: &str) {
+pub fn switch_mic_on_mute(muted: bool, main_mic_id: &str, hyperx_mic_id: &str) {
     if muted {
-        // Verify the main mic still exists before switching
-        let exists = enumerate_input_devices()
-            .iter()
-            .any(|d| d.id == main_mic_id);
-        if exists {
-            set_default_endpoint(main_mic_id);
-        }
+        set_default_endpoint(main_mic_id);
     } else {
-        // Switch back to HyperX
-        if let Some(hyperx_id) = find_hyperx_device_id() {
-            set_default_endpoint(&hyperx_id);
-        }
+        set_default_endpoint(hyperx_mic_id);
     }
 }
 
