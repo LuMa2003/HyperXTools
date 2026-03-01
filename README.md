@@ -75,15 +75,6 @@ cargo install cargo-wix
 cargo wix
 ```
 
-## TODO
-
-<details>
-<summary>Maybe</summary>
-
-- **Populate a WiX ListBox via custom action DLL** — Write a C/Rust DLL custom action that enumerates audio devices and fills a WiX ListBox property. This keeps everything inside the installer wizard but is significantly more work (separate DLL project, WiX custom action interface, etc.).
-
-</details>
-
 ## License
 
 MIT
