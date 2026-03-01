@@ -5,14 +5,22 @@ use std::path::{Path, PathBuf};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::System::Threading::WaitForSingleObject;
+use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
 const GITHUB_API_URL: &str = "https://api.github.com/repos/LuMa2003/HyperXTools/releases/latest";
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-// Edit control styles
+/// Allowed URL prefixes for download URLs (security: prevent redirects to arbitrary hosts).
+const ALLOWED_URL_PREFIXES: &[&str] = &[
+    "https://github.com/",
+    "https://objects.githubusercontent.com/",
+];
+
+// Win32 edit control styles — not exported by the `windows` crate.
+// See: https://learn.microsoft.com/en-us/windows/win32/controls/edit-control-styles
 const ES_MULTILINE: u32 = 0x0004;
 const ES_READONLY: u32 = 0x0800;
 const ES_AUTOVSCROLL: u32 = 0x0040;
@@ -31,6 +39,7 @@ pub struct UpdateInfo {
     pub version: String,
     pub changelog: String,
     pub download_url: String,
+    pub expected_sha256: Option<String>,
 }
 
 /// User's choice from the update dialog.
@@ -44,6 +53,35 @@ pub enum UpdateChoice {
 struct DialogState {
     choice: UpdateChoice,
     done: bool,
+}
+
+/// Posts a `WM_UPDATE_AVAILABLE` message with a heap-allocated `UpdateInfo`.
+/// Handles `Box::into_raw` + `PostMessageW`, and cleans up on failure.
+///
+/// # Safety
+/// `hwnd` must be a valid window handle for `PostMessageW`.
+pub unsafe fn post_update_info(hwnd: HWND, msg: u32, info: UpdateInfo) {
+    let boxed_ptr = Box::into_raw(Box::new(info));
+    unsafe {
+        if PostMessageW(
+            Some(hwnd),
+            msg,
+            WPARAM(0),
+            LPARAM(boxed_ptr as isize),
+        )
+        .is_err()
+        {
+            let _ = Box::from_raw(boxed_ptr);
+        }
+    }
+}
+
+/// Removes the leftover `.old` file from a previous update, if it exists.
+pub fn cleanup_old_exe() {
+    if let Ok(current) = std::env::current_exe() {
+        let old_path = current.with_extension("exe.old");
+        let _ = std::fs::remove_file(old_path);
+    }
 }
 
 /// Checks GitHub for a newer release.
@@ -62,7 +100,13 @@ pub fn check_for_update(skipped_version: Option<&str>) -> Result<Option<UpdateIn
         .header("User-Agent", &format!("HyperXTools/{CURRENT_VERSION}"))
         .header("Accept", "application/vnd.github.v3+json")
         .call()
-        .map_err(|e| format!("Network error: {e}"))?;
+        .map_err(|e| match e {
+            ureq::Error::StatusCode(403) => {
+                "GitHub API rate limit exceeded. Please try again in a few minutes.".to_string()
+            }
+            ureq::Error::StatusCode(code) => format!("GitHub API returned HTTP {code}"),
+            _ => format!("Network error: {e}"),
+        })?;
 
     let body = resp
         .body_mut()
@@ -107,10 +151,26 @@ pub fn check_for_update(skipped_version: Option<&str>) -> Result<Option<UpdateIn
         .ok_or("Missing download URL for exe asset")?
         .to_string();
 
+    // Look for a .sha256 hash file in the release assets
+    let expected_sha256 = assets
+        .iter()
+        .find(|a| a["name"].as_str().is_some_and(|n| n.ends_with(".sha256")))
+        .and_then(|a| a["browser_download_url"].as_str())
+        .and_then(|url| {
+            agent
+                .get(url)
+                .header("User-Agent", &format!("HyperXTools/{CURRENT_VERSION}"))
+                .call()
+                .ok()
+                .and_then(|mut r| r.body_mut().read_to_string().ok())
+                .map(|s| s.trim().to_lowercase())
+        });
+
     Ok(Some(UpdateInfo {
         version: version_str.to_string(),
         changelog,
         download_url,
+        expected_sha256,
     }))
 }
 
@@ -393,8 +453,95 @@ unsafe extern "system" fn update_wndproc(
     }
 }
 
+/// Creates a small topmost popup showing "Downloading update...".
+/// Returns the window handle so it can be dismissed later.
+pub fn show_download_progress() -> Option<HWND> {
+    unsafe {
+        let instance = GetModuleHandleW(None).ok()?;
+        let screen_w = GetSystemMetrics(SM_CXSCREEN);
+        let screen_h = GetSystemMetrics(SM_CYSCREEN);
+        let w = 260;
+        let h = 60;
+        let x = (screen_w - w) / 2;
+        let y = (screen_h - h) / 2;
+
+        let hwnd = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+            w!("STATIC"),
+            w!("  Downloading update..."),
+            WS_POPUP | WS_VISIBLE | WS_BORDER,
+            x,
+            y,
+            w,
+            h,
+            None,
+            None,
+            Some(instance.into()),
+            None,
+        )
+        .ok()?;
+
+        let font = GetStockObject(DEFAULT_GUI_FONT);
+        SendMessageW(
+            hwnd,
+            WM_SETFONT,
+            Some(WPARAM(font.0 as usize)),
+            Some(LPARAM(1)),
+        );
+        let _ = UpdateWindow(hwnd);
+        Some(hwnd)
+    }
+}
+
+/// Dismisses the download progress popup, if one is showing.
+pub fn dismiss_download_progress(hwnd: Option<HWND>) {
+    if let Some(h) = hwnd {
+        unsafe {
+            let _ = DestroyWindow(h);
+        }
+    }
+}
+
+/// Validates that a download URL points to an expected GitHub host.
+fn validate_download_url(url: &str) -> Result<(), String> {
+    if ALLOWED_URL_PREFIXES.iter().any(|prefix| url.starts_with(prefix)) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Download URL has unexpected host (expected github.com): {url}"
+        ))
+    }
+}
+
+/// Verifies the SHA-256 hash of a file against an expected hex digest.
+fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
+    use sha2::Digest;
+
+    let mut file =
+        std::fs::File::open(path).map_err(|e| format!("Failed to open file for hash: {e}"))?;
+    let mut hasher = sha2::Sha256::new();
+    std::io::copy(&mut file, &mut hasher).map_err(|e| format!("Failed to read file for hash: {e}"))?;
+    let actual = format!("{:x}", hasher.finalize());
+
+    // Compare only the hex hash portion (the .sha256 file may contain a filename after the hash)
+    let expected_hash = expected.split_whitespace().next().unwrap_or(expected);
+
+    if actual == expected_hash {
+        Ok(())
+    } else {
+        Err(format!(
+            "SHA-256 mismatch: expected {expected_hash}, got {actual}"
+        ))
+    }
+}
+
 /// Downloads the new exe and replaces the running one via rename swap.
-pub fn download_and_replace(download_url: &str) -> Result<PathBuf, String> {
+pub fn download_and_replace(
+    download_url: &str,
+    expected_sha256: Option<&str>,
+) -> Result<PathBuf, String> {
+    validate_download_url(download_url)?;
+
     let current_exe =
         std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {e}"))?;
     let dir = current_exe.parent().ok_or("Failed to get exe directory")?;
@@ -421,6 +568,14 @@ pub fn download_and_replace(download_url: &str) -> Result<PathBuf, String> {
     let mut reader = resp.body_mut().as_reader();
     std::io::copy(&mut reader, &mut file).map_err(|e| format!("Failed to write download: {e}"))?;
     drop(file);
+
+    // Verify SHA-256 hash if one was published
+    if let Some(expected) = expected_sha256
+        && let Err(e) = verify_sha256(&new_path, expected)
+    {
+        let _ = std::fs::remove_file(&new_path);
+        return Err(e);
+    }
 
     // Rename swap: current → .old, then .new → current
     match do_rename_swap(&current_exe, &new_path, &old_path) {
@@ -468,29 +623,41 @@ fn elevate_replace(current: &Path, new_path: &Path, old_path: &Path) -> Result<(
         .collect();
     let params_w: Vec<u16> = params.encode_utf16().chain(std::iter::once(0)).collect();
 
-    let result = unsafe {
-        ShellExecuteW(
-            None,
-            w!("runas"),
-            PCWSTR(exe_w.as_ptr()),
-            PCWSTR(params_w.as_ptr()),
-            None,
-            SW_HIDE,
-        )
+    let mut sei = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: w!("runas"),
+        lpFile: PCWSTR(exe_w.as_ptr()),
+        lpParameters: PCWSTR(params_w.as_ptr()),
+        nShow: SW_HIDE.0,
+        ..Default::default()
     };
 
-    if (result.0 as isize) <= 32 {
-        return Err("UAC elevation was cancelled or failed".to_string());
+    unsafe {
+        ShellExecuteExW(&mut sei).map_err(|_| "UAC elevation was cancelled or failed".to_string())?;
     }
 
-    // Poll for the elevated process to complete the rename
-    for _ in 0..30 {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        if !new_path.exists() && old_path.exists() {
-            return Ok(());
-        }
+    let handle = sei.hProcess;
+    if handle.is_invalid() {
+        return Err("Failed to get elevated process handle".to_string());
     }
-    Err("Elevated rename timed out".to_string())
+
+    // Wait up to 30 seconds for the elevated process to finish
+    let wait_result = unsafe { WaitForSingleObject(handle, 30_000) };
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+
+    if wait_result == WAIT_OBJECT_0 {
+        // Verify the swap actually happened
+        if !new_path.exists() && old_path.exists() {
+            Ok(())
+        } else {
+            Err("Elevated process completed but rename swap did not succeed".to_string())
+        }
+    } else {
+        Err("Elevated rename timed out".to_string())
+    }
 }
 
 /// Handles the `--replace-exe <new> <target> <old>` CLI mode (runs elevated).
@@ -502,8 +669,51 @@ pub fn handle_replace_exe(args: &[String]) -> Result<(), String> {
     let target_path = Path::new(&args[1]);
     let old_path = Path::new(&args[2]);
 
+    // Validate all paths resolve within the current exe's directory
+    validate_replace_paths(new_path, target_path, old_path)?;
+
     do_rename_swap(target_path, new_path, old_path)
         .map_err(|e| format!("Elevated rename failed: {e}"))
+}
+
+/// Validates that all `--replace-exe` paths are within the current exe's directory.
+fn validate_replace_paths(new_path: &Path, target_path: &Path, old_path: &Path) -> Result<(), String> {
+    let current_exe =
+        std::env::current_exe().map_err(|e| format!("Failed to get current exe: {e}"))?;
+    let exe_dir = current_exe
+        .parent()
+        .ok_or("Failed to get exe directory")?;
+    let exe_dir_canon = exe_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize exe dir: {e}"))?;
+
+    for (label, path) in [("new", new_path), ("target", target_path)] {
+        let canon = path
+            .canonicalize()
+            .map_err(|e| format!("Failed to canonicalize {label} path: {e}"))?;
+        if !canon.starts_with(&exe_dir_canon) {
+            return Err(format!(
+                "Rejected {label} path outside exe directory: {}",
+                path.display()
+            ));
+        }
+    }
+
+    // old_path may not exist yet — canonicalize its parent directory instead
+    let old_parent = old_path
+        .parent()
+        .ok_or("old_path has no parent directory")?;
+    let old_parent_canon = old_parent
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize old path parent: {e}"))?;
+    if !old_parent_canon.starts_with(&exe_dir_canon) {
+        return Err(format!(
+            "Rejected old path outside exe directory: {}",
+            old_path.display()
+        ));
+    }
+
+    Ok(())
 }
 
 /// Spawns the updated exe and exits the current process.

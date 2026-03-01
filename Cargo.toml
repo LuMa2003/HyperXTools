@@ -13,6 +13,7 @@ serde_json = "1"
 toml = "0.8"
 ureq = "3"
 semver = "1"
+sha2 = "0.10"
 com-policy-config = "0.6"
 
 [dependencies.windows]
@@ -31,6 +32,7 @@ features = [
     "Win32_System_Variant",
     "Win32_Media_Audio",
     "Win32_Devices_FunctionDiscovery",
+    "Win32_System_Threading",
 ]
 
 [[bin]]
