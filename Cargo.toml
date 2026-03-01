@@ -39,6 +39,9 @@ features = [
 name = "hid_logger"
 path = "src/bin/hid_logger.rs"
 
+[build-dependencies]
+winresource = "0.1"
+
 [profile.release]
 lto = true
 opt-level = "s"
