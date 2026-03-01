@@ -31,10 +31,16 @@ jobs:
       - name: Build MSI installer
         run: cargo wix --no-build --nocapture
 
+      - name: Compute SHA-256 hash
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 target/release/hyperxtools.exe).Hash.ToLower()
+          "$hash  hyperxtools.exe" | Out-File -Encoding ascii -NoNewline target/release/hyperxtools.exe.sha256
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
             target/release/hyperxtools.exe
+            target/release/hyperxtools.exe.sha256
             target/wix/*.msi

@@ -227,21 +227,13 @@ impl TrayIcon {
                 let hwnd_raw = self.hwnd.0 as usize;
                 std::thread::spawn(move || {
                     match updater::check_for_update(None) {
-                        Ok(Some(info)) => {
-                            let boxed_ptr = Box::into_raw(Box::new(info));
-                            unsafe {
-                                if PostMessageW(
-                                    Some(HWND(hwnd_raw as *mut _)),
-                                    WM_UPDATE_AVAILABLE,
-                                    WPARAM(0),
-                                    LPARAM(boxed_ptr as isize),
-                                )
-                                .is_err()
-                                {
-                                    let _ = Box::from_raw(boxed_ptr);
-                                }
-                            }
-                        }
+                        Ok(Some(info)) => unsafe {
+                            updater::post_update_info(
+                                HWND(hwnd_raw as *mut _),
+                                WM_UPDATE_AVAILABLE,
+                                info,
+                            );
+                        },
                         Ok(None) => unsafe {
                             MessageBoxW(
                                 None,
@@ -250,14 +242,19 @@ impl TrayIcon {
                                 MB_OK | MB_ICONINFORMATION,
                             );
                         },
-                        Err(_) => unsafe {
-                            MessageBoxW(
-                                None,
-                                w!("Could not check for updates. Please try again later."),
-                                w!("HyperXTools \u{2014} Update Check"),
-                                MB_OK | MB_ICONWARNING,
-                            );
-                        },
+                        Err(e) => {
+                            let msg = format!("Could not check for updates.\n\n{e}");
+                            let msg_w: Vec<u16> =
+                                msg.encode_utf16().chain(std::iter::once(0)).collect();
+                            unsafe {
+                                MessageBoxW(
+                                    None,
+                                    windows::core::PCWSTR(msg_w.as_ptr()),
+                                    w!("HyperXTools \u{2014} Update Check"),
+                                    MB_OK | MB_ICONWARNING,
+                                );
+                            }
+                        }
                     }
                 });
             }
@@ -414,7 +411,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let info = unsafe { Box::from_raw(lparam.0 as *mut updater::UpdateInfo) };
             match updater::show_update_dialog(&info) {
                 updater::UpdateChoice::UpdateNow => {
-                    match updater::download_and_replace(&info.download_url) {
+                    let progress = updater::show_download_progress();
+                    let result = updater::download_and_replace(
+                        &info.download_url,
+                        info.expected_sha256.as_deref(),
+                    );
+                    updater::dismiss_download_progress(progress);
+                    match result {
                         Ok(exe_path) => updater::relaunch_and_exit(&exe_path),
                         Err(e) => {
                             let msg = format!(

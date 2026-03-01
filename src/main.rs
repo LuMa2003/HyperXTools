@@ -41,6 +41,9 @@ fn main() {
         }
     }
 
+    // Clean up leftover .old file from a previous update
+    updater::cleanup_old_exe();
+
     // Handle --select-mic CLI arg: show picker, save config, exit
     if args.iter().any(|a| a == "--select-mic") {
         debug_log!("[main] --select-mic mode");
@@ -98,18 +101,12 @@ fn main() {
     thread::spawn(move || {
         thread::sleep(std::time::Duration::from_secs(5));
         if let Ok(Some(info)) = updater::check_for_update(skipped_version.as_deref()) {
-            let boxed_ptr = Box::into_raw(Box::new(info));
             unsafe {
-                if PostMessageW(
-                    Some(HWND(update_hwnd as *mut _)),
+                updater::post_update_info(
+                    HWND(update_hwnd as *mut _),
                     tray::WM_UPDATE_AVAILABLE,
-                    WPARAM(0),
-                    LPARAM(boxed_ptr as isize),
-                )
-                .is_err()
-                {
-                    let _ = Box::from_raw(boxed_ptr);
-                }
+                    info,
+                );
             }
         }
     });
