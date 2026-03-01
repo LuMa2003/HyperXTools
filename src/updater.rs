@@ -17,6 +17,7 @@ pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const ALLOWED_URL_PREFIXES: &[&str] = &[
     "https://github.com/",
     "https://objects.githubusercontent.com/",
+    "https://release-assets.githubusercontent.com/",
 ];
 
 // Win32 edit control styles — not exported by the `windows` crate.
