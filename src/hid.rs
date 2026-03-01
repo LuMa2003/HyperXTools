@@ -204,13 +204,6 @@ impl HidDevice {
         }
     }
 
-    /// Sends a command and reads all responses until timeout (drains the queue).
-    pub fn send_and_drain(&self, cmd: u8, timeout_ms: i32) {
-        self.send_command(cmd);
-        // Read responses until timeout (dongle may send multiple replies per request)
-        while self.read_raw(timeout_ms).is_some() {}
-    }
-
     /// Requests battery level from the dongle.
     pub fn request_battery(&self) -> bool {
         self.send_command(CMD_GET_BATTERY)
@@ -226,29 +219,4 @@ impl HidDevice {
         self.send_command(CMD_GET_CONNECTION)
     }
 
-    /// Sends every known GET command to discover what the dongle reports.
-    /// Useful for reverse-engineering / debugging.
-    pub fn probe_all(&self) {
-        const PROBES: &[(u8, &str)] = &[
-            (0x03, "connection"),
-            (0x04, "pairing info"),
-            (0x05, "sidetone on/off"),
-            (0x06, "sidetone volume"),
-            (0x07, "auto shutdown"),
-            (0x08, "mic connected"),
-            (0x09, "voice prompts"),
-            (0x0A, "mute state"),
-            (0x0B, "battery level"),
-            (0x0C, "charging state"),
-            (0x0D, "unknown 0x0D"),
-            (0x0E, "product color"),
-        ];
-
-        println!("=== Probing all known commands ===");
-        for &(cmd, label) in PROBES {
-            println!("--- {label} (cmd {cmd:#04X}) ---");
-            self.send_and_drain(cmd, 500);
-        }
-        println!("=== Probe complete ===\n");
-    }
 }
