@@ -21,7 +21,7 @@ jobs:
         run: cargo build --release
 
       - name: Install cargo-wix
-        run: cargo install cargo-wix
+        run: cargo install cargo-wix --version 0.3.4 --locked
 
       - name: Install WiX Toolset 3
         run: |

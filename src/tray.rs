@@ -226,25 +226,38 @@ impl TrayIcon {
                 // Manual check ignores skipped_version (pass None)
                 let hwnd_raw = self.hwnd.0 as usize;
                 std::thread::spawn(move || {
-                    if let Some(info) = updater::check_for_update(None) {
-                        let boxed = Box::new(info);
-                        unsafe {
-                            let _ = PostMessageW(
-                                Some(HWND(hwnd_raw as *mut _)),
-                                WM_UPDATE_AVAILABLE,
-                                WPARAM(0),
-                                LPARAM(Box::into_raw(boxed) as isize),
-                            );
+                    match updater::check_for_update(None) {
+                        Ok(Some(info)) => {
+                            let boxed_ptr = Box::into_raw(Box::new(info));
+                            unsafe {
+                                if PostMessageW(
+                                    Some(HWND(hwnd_raw as *mut _)),
+                                    WM_UPDATE_AVAILABLE,
+                                    WPARAM(0),
+                                    LPARAM(boxed_ptr as isize),
+                                )
+                                .is_err()
+                                {
+                                    let _ = Box::from_raw(boxed_ptr);
+                                }
+                            }
                         }
-                    } else {
-                        unsafe {
+                        Ok(None) => unsafe {
                             MessageBoxW(
                                 None,
                                 w!("You're running the latest version."),
                                 w!("HyperXTools \u{2014} Update Check"),
                                 MB_OK | MB_ICONINFORMATION,
                             );
-                        }
+                        },
+                        Err(_) => unsafe {
+                            MessageBoxW(
+                                None,
+                                w!("Could not check for updates. Please try again later."),
+                                w!("HyperXTools \u{2014} Update Check"),
+                                MB_OK | MB_ICONWARNING,
+                            );
+                        },
                     }
                 });
             }

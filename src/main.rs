@@ -97,15 +97,19 @@ fn main() {
     let update_hwnd = hwnd.0 as usize;
     thread::spawn(move || {
         thread::sleep(std::time::Duration::from_secs(5));
-        if let Some(info) = updater::check_for_update(skipped_version.as_deref()) {
-            let boxed = Box::new(info);
+        if let Ok(Some(info)) = updater::check_for_update(skipped_version.as_deref()) {
+            let boxed_ptr = Box::into_raw(Box::new(info));
             unsafe {
-                let _ = PostMessageW(
+                if PostMessageW(
                     Some(HWND(update_hwnd as *mut _)),
                     tray::WM_UPDATE_AVAILABLE,
                     WPARAM(0),
-                    LPARAM(Box::into_raw(boxed) as isize),
-                );
+                    LPARAM(boxed_ptr as isize),
+                )
+                .is_err()
+                {
+                    let _ = Box::from_raw(boxed_ptr);
+                }
             }
         }
     });
