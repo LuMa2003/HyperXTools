@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="HyperXTools logo" width="128">
+</p>
+
 # HyperXTools
 
 A lightweight Windows system tray application for the **HyperX Cloud Alpha Wireless** headset. It communicates directly with the USB dongle via HID to provide features that HyperX's own software doesn't:
