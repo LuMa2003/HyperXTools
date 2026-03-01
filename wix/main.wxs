@@ -120,6 +120,9 @@
 
         <Property Id='WIXUI_INSTALLDIR' Value='APPLICATIONFOLDER'/>
 
+        <WixVariable Id='WixUIBannerBmp' Value='assets\installer-banner.bmp'/>
+        <WixVariable Id='WixUIDialogBmp' Value='assets\installer-dialog.bmp'/>
+
     </Product>
 
 </Wix>
