@@ -151,20 +151,11 @@ pub fn check_for_update(skipped_version: Option<&str>) -> Result<Option<UpdateIn
         .ok_or("Missing download URL for exe asset")?
         .to_string();
 
-    // Look for a .sha256 hash file in the release assets
-    let expected_sha256 = assets
-        .iter()
-        .find(|a| a["name"].as_str().is_some_and(|n| n.ends_with(".sha256")))
-        .and_then(|a| a["browser_download_url"].as_str())
-        .and_then(|url| {
-            agent
-                .get(url)
-                .header("User-Agent", &format!("HyperXTools/{CURRENT_VERSION}"))
-                .call()
-                .ok()
-                .and_then(|mut r| r.body_mut().read_to_string().ok())
-                .map(|s| s.trim().to_lowercase())
-        });
+    // Extract SHA-256 digest from the API response (format: "sha256:<hex>")
+    let expected_sha256 = exe_asset["digest"]
+        .as_str()
+        .and_then(|d| d.strip_prefix("sha256:"))
+        .map(|h| h.to_lowercase());
 
     Ok(Some(UpdateInfo {
         version: version_str.to_string(),
@@ -523,14 +514,11 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
     std::io::copy(&mut file, &mut hasher).map_err(|e| format!("Failed to read file for hash: {e}"))?;
     let actual = format!("{:x}", hasher.finalize());
 
-    // Compare only the hex hash portion (the .sha256 file may contain a filename after the hash)
-    let expected_hash = expected.split_whitespace().next().unwrap_or(expected);
-
-    if actual == expected_hash {
+    if actual == expected {
         Ok(())
     } else {
         Err(format!(
-            "SHA-256 mismatch: expected {expected_hash}, got {actual}"
+            "SHA-256 mismatch: expected {expected}, got {actual}"
         ))
     }
 }
