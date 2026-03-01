@@ -23,9 +23,9 @@ jobs:
       - name: Install cargo-wix
         run: cargo install cargo-wix --version 0.3.4 --locked
 
-      - name: Install WiX Toolset 3
+      - name: Ensure WiX Toolset 3 is on PATH
         run: |
-          choco install wixtoolset -y --version=3.14.1
+          choco upgrade wixtoolset -y --no-progress
           echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build MSI installer
