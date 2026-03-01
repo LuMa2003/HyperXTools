@@ -79,7 +79,7 @@ pub fn find_dongle() -> Option<HidDevice> {
             continue;
         }
 
-        println!(
+        debug_log!(
             "Found dongle: VID={:#06X} PID={:#06X} usage_page={:#06X} interface={}",
             vid,
             pid,
@@ -89,11 +89,11 @@ pub fn find_dongle() -> Option<HidDevice> {
 
         match info.open_device(&api) {
             Ok(device) => {
-                println!("Opened HID device successfully");
+                debug_log!("Opened HID device successfully");
                 return Some(HidDevice { inner: device });
             }
-            Err(e) => {
-                println!("Failed to open device: {e}");
+            Err(_e) => {
+                debug_log!("Failed to open device: {_e}");
             }
         }
     }
@@ -111,12 +111,12 @@ impl HidDevice {
             Ok(n) => {
                 // Print first 8 bytes (matches protocol's meaningful prefix)
                 let show = n.min(8);
-                let hex: Vec<String> = buf[..show].iter().map(|b| format!("{b:02X}")).collect();
-                println!("<< [{n} bytes] {}", hex.join(" "));
+                let _hex: Vec<String> = buf[..show].iter().map(|b| format!("{b:02X}")).collect();
+                debug_log!("<< [{n} bytes] {}", _hex.join(" "));
                 Some((n, buf))
             }
-            Err(e) => {
-                eprintln!("HID read error: {e}");
+            Err(_e) => {
+                debug_log!("HID read error: {_e}");
                 None
             }
         }
@@ -160,7 +160,7 @@ impl HidDevice {
                 }
 
                 _ => {
-                    println!(
+                    debug_log!(
                         "Unknown report: {:02X} {:02X} {:02X} {:02X} (+ {} bytes)",
                         buf[0],
                         buf[1],
@@ -191,14 +191,14 @@ impl HidDevice {
         buf[0] = CMD_PREFIX[0];
         buf[1] = CMD_PREFIX[1];
         buf[2] = cmd;
-        println!(
+        debug_log!(
             ">> [{} bytes] {:02X} {:02X} {:02X}",
             WRITE_BUF_SIZE, buf[0], buf[1], buf[2]
         );
         match self.inner.write(&buf) {
             Ok(_) => true,
-            Err(e) => {
-                eprintln!("HID write error (cmd {:#04X}): {e}", cmd);
+            Err(_e) => {
+                debug_log!("HID write error (cmd {:#04X}): {_e}", cmd);
                 false
             }
         }

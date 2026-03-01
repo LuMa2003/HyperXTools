@@ -5,7 +5,7 @@ use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Result, w};
 
-use crate::{audio, autostart, config, icon, mic_picker, updater};
+use crate::{audio, autostart, config, icon, mic_picker, updater, updater::CURRENT_VERSION};
 
 // Menu item IDs
 const ID_SYNC_MUTE: u16 = 1001;
@@ -79,7 +79,7 @@ impl TrayIcon {
                 hIcon: initial_icon,
                 ..Default::default()
             };
-            set_tooltip(&mut nid, "HyperX: Disconnected");
+            set_tooltip(&mut nid, "HyperX: Headset off");
             let _ = Shell_NotifyIconW(NIM_ADD, &nid);
 
             Ok(TrayIcon {
@@ -170,6 +170,16 @@ impl TrayIcon {
                 MF_STRING,
                 ID_CHECK_UPDATE as usize,
                 w!("Check for Updates"),
+            );
+
+            let version_label = format!("v{CURRENT_VERSION}");
+            let version_wide: Vec<u16> =
+                version_label.encode_utf16().chain(std::iter::once(0)).collect();
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING | MF_GRAYED,
+                0,
+                windows::core::PCWSTR(version_wide.as_ptr()),
             );
 
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
@@ -287,7 +297,7 @@ impl TrayIcon {
                 "HyperX: Connected".to_string()
             }
         } else {
-            "HyperX: Disconnected".to_string()
+            "HyperX: Headset off".to_string()
         };
 
         unsafe {

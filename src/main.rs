@@ -21,7 +21,9 @@ mod updater;
 use hid::HeadsetEvent;
 use std::thread;
 use windows::Win32::Foundation::*;
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::{PCWSTR, w};
 
 /// Wrapper to send HWND across thread boundaries.
 /// SAFETY: HWND is a numeric handle; PostMessageW is explicitly thread-safe.
@@ -65,11 +67,18 @@ fn main() {
         return;
     }
 
+    // Prevent multiple instances from running simultaneously
+    let mutex_name = w!("Global\\HyperXTools_SingleInstance");
+    let _mutex = unsafe { CreateMutexW(None, true, mutex_name) };
+    if _mutex.is_ok() && unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        return;
+    }
+
     // Initialize COM for the main thread — kept alive for the app's lifetime
     // so that mic switching and the mic picker can use audio APIs directly.
     let _com = audio::init_com();
 
-    let config = config::Config::load();
+    let mut config = config::Config::load();
     let skipped_version = config.skipped_version.clone();
     debug_log!(
         "[main] config loaded: mic_switching={}, main_mic_id={:?}",
@@ -77,13 +86,40 @@ fn main() {
         config.main_mic_id
     );
 
+    // If mic switching is enabled, verify the saved mic device still exists
+    if config.mic_switching
+        && let Some(ref mic_id) = config.main_mic_id
+    {
+        let devices = audio::enumerate_input_devices();
+        if !devices.iter().any(|d| d.id == *mic_id) {
+            config.mic_switching = false;
+            config.main_mic_id = None;
+            config.main_mic_name = None;
+            config.save();
+        }
+    }
+
     // Look up the HyperX audio device ID once at startup.
     // Exits with an error dialog if no HyperX dongle is found.
     let hyperx_mic_id = audio::require_hyperx_device();
     debug_log!("[main] hyperx_mic_id={:?}", hyperx_mic_id);
 
-    let tray =
-        Box::new(tray::TrayIcon::new(config, hyperx_mic_id).expect("Failed to create tray icon"));
+    let tray = match tray::TrayIcon::new(config, hyperx_mic_id) {
+        Ok(t) => Box::new(t),
+        Err(e) => {
+            let msg = format!("Failed to create tray icon: {e}");
+            let msg_w: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+            unsafe {
+                MessageBoxW(
+                    None,
+                    PCWSTR(msg_w.as_ptr()),
+                    w!("HyperXTools"),
+                    MB_OK | MB_ICONERROR,
+                );
+            }
+            return;
+        }
+    };
     let hwnd = tray.hwnd();
 
     // Leak TrayIcon into a raw pointer for wndproc access via GWLP_USERDATA
