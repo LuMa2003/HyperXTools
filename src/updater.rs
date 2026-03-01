@@ -533,11 +533,14 @@ pub fn download_and_replace(
     let current_exe =
         std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {e}"))?;
     let dir = current_exe.parent().ok_or("Failed to get exe directory")?;
-    let new_path = dir.join("hyperxtools.exe.new");
     let old_path = dir.join("hyperxtools.exe.old");
 
-    // Clean up leftover from previous update
+    // Download to %TEMP% to avoid "Access denied" in protected directories (e.g. Program Files)
+    let new_path = std::env::temp_dir().join("hyperxtools-update.exe");
+
+    // Clean up leftovers from previous update
     let _ = std::fs::remove_file(&old_path);
+    let _ = std::fs::remove_file(&new_path);
 
     // Download new exe
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -586,14 +589,25 @@ pub fn download_and_replace(
 }
 
 /// Renames current → .old, then .new → current. Rolls back on failure.
+/// Falls back to copy+delete when .new is on a different volume (ERROR_NOT_SAME_DEVICE).
 fn do_rename_swap(current: &Path, new_path: &Path, old_path: &Path) -> std::io::Result<()> {
     std::fs::rename(current, old_path)?;
-    if let Err(e) = std::fs::rename(new_path, current) {
-        // Rollback: restore original
-        let _ = std::fs::rename(old_path, current);
-        return Err(e);
+    match std::fs::rename(new_path, current) {
+        Ok(()) => Ok(()),
+        Err(e) if e.raw_os_error() == Some(17) => {
+            // Cross-volume: copy then delete the source
+            if let Err(copy_err) = std::fs::copy(new_path, current) {
+                let _ = std::fs::rename(old_path, current);
+                return Err(copy_err);
+            }
+            let _ = std::fs::remove_file(new_path);
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::rename(old_path, current);
+            Err(e)
+        }
     }
-    Ok(())
 }
 
 /// Runs the current binary elevated with `--replace-exe` to perform the swap.
@@ -664,7 +678,8 @@ pub fn handle_replace_exe(args: &[String]) -> Result<(), String> {
         .map_err(|e| format!("Elevated rename failed: {e}"))
 }
 
-/// Validates that all `--replace-exe` paths are within the current exe's directory.
+/// Validates that `--replace-exe` paths are within allowed directories.
+/// `new_path` may be in %TEMP% or the exe dir; `target_path` and `old_path` must be in the exe dir.
 fn validate_replace_paths(new_path: &Path, target_path: &Path, old_path: &Path) -> Result<(), String> {
     let current_exe =
         std::env::current_exe().map_err(|e| format!("Failed to get current exe: {e}"))?;
@@ -674,17 +689,30 @@ fn validate_replace_paths(new_path: &Path, target_path: &Path, old_path: &Path) 
     let exe_dir_canon = exe_dir
         .canonicalize()
         .map_err(|e| format!("Failed to canonicalize exe dir: {e}"))?;
+    let temp_dir_canon = std::env::temp_dir()
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize temp dir: {e}"))?;
 
-    for (label, path) in [("new", new_path), ("target", target_path)] {
-        let canon = path
-            .canonicalize()
-            .map_err(|e| format!("Failed to canonicalize {label} path: {e}"))?;
-        if !canon.starts_with(&exe_dir_canon) {
-            return Err(format!(
-                "Rejected {label} path outside exe directory: {}",
-                path.display()
-            ));
-        }
+    // new_path may be in %TEMP% (downloaded there) or in the exe directory
+    let new_canon = new_path
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize new path: {e}"))?;
+    if !new_canon.starts_with(&exe_dir_canon) && !new_canon.starts_with(&temp_dir_canon) {
+        return Err(format!(
+            "Rejected new path outside allowed directories: {}",
+            new_path.display()
+        ));
+    }
+
+    // target_path must be in the exe directory
+    let target_canon = target_path
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize target path: {e}"))?;
+    if !target_canon.starts_with(&exe_dir_canon) {
+        return Err(format!(
+            "Rejected target path outside exe directory: {}",
+            target_path.display()
+        ));
     }
 
     // old_path may not exist yet — canonicalize its parent directory instead
