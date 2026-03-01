@@ -25,6 +25,19 @@ HyperXTools runs in the system tray. Right-click the tray icon to:
 - Select your main microphone
 - Enable/disable launch at startup
 
+## Setting up Discord mute sync
+
+HyperXTools sends an **F13** keypress every time you press the mute button on your headset. To make Discord respond to it:
+
+1. Open **Discord Settings** > **Keybinds**
+2. Click **Add a Keybind** and set the action to **Toggle Mute**
+3. Click the keybind field and press the **mute button on your headset** — Discord will register it as `F13`
+4. Save and close settings
+
+Now pressing the headset mute button will toggle your Discord mute in sync with the hardware.
+
+> **Tip:** This works with any app that supports custom keybinds (Teams, OBS, etc.) — just bind F13 to the mute/unmute action.
+
 ## Development
 
 ### Prerequisites
