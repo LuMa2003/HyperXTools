@@ -133,13 +133,13 @@ impl HidDevice {
 
             return match sub {
                 // Mute state
-                SUB_MUTE | SUB_MUTE_PUSH | SUB_MUTE_SET => Some(HeadsetEvent::Mute(
-                    if value == 0x01 {
+                SUB_MUTE | SUB_MUTE_PUSH | SUB_MUTE_SET => {
+                    Some(HeadsetEvent::Mute(if value == 0x01 {
                         MuteState::Muted
                     } else {
                         MuteState::Unmuted
-                    },
-                )),
+                    }))
+                }
 
                 // Battery level (percent in byte 3)
                 SUB_BATTERY | SUB_BATTERY_PUSH => Some(HeadsetEvent::Battery(BatteryStatus {
@@ -191,7 +191,10 @@ impl HidDevice {
         buf[0] = CMD_PREFIX[0];
         buf[1] = CMD_PREFIX[1];
         buf[2] = cmd;
-        println!(">> [{} bytes] {:02X} {:02X} {:02X}", WRITE_BUF_SIZE, buf[0], buf[1], buf[2]);
+        println!(
+            ">> [{} bytes] {:02X} {:02X} {:02X}",
+            WRITE_BUF_SIZE, buf[0], buf[1], buf[2]
+        );
         match self.inner.write(&buf) {
             Ok(_) => true,
             Err(e) => {

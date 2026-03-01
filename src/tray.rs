@@ -1,11 +1,11 @@
 use std::mem;
-use windows::core::{w, Result};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::{Result, w};
 
-use crate::{audio, autostart, config, icon, mic_picker};
+use crate::{audio, autostart, config, icon, mic_picker, updater};
 
 // Menu item IDs
 const ID_SYNC_MUTE: u16 = 1001;
@@ -13,11 +13,13 @@ const ID_EXIT: u16 = 1002;
 const ID_AUTOSTART: u16 = 1003;
 const ID_MIC_SWITCH: u16 = 1004;
 const ID_MIC_SELECT: u16 = 1005;
+const ID_CHECK_UPDATE: u16 = 1006;
 
 // Custom window messages for HID thread → main thread communication
 pub const WM_HID_BATTERY: u32 = WM_APP + 1;
 pub const WM_HID_MUTE: u32 = WM_APP + 2;
 pub const WM_HID_CONNECTION: u32 = WM_APP + 3;
+pub const WM_UPDATE_AVAILABLE: u32 = WM_APP + 4;
 
 // Tray icon callback message
 const WM_TRAY_CALLBACK: u32 = WM_APP + 100;
@@ -163,6 +165,13 @@ impl TrayIcon {
                 w!("Start with Windows"),
             );
 
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
+                ID_CHECK_UPDATE as usize,
+                w!("Check for Updates"),
+            );
+
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
             let _ = AppendMenuW(menu, MF_STRING, ID_EXIT as usize, w!("Exit"));
 
@@ -212,6 +221,32 @@ impl TrayIcon {
                     self.config.main_mic_name = Some(device.name);
                     self.config.save();
                 }
+            }
+            ID_CHECK_UPDATE => {
+                // Manual check ignores skipped_version (pass None)
+                let hwnd_raw = self.hwnd.0 as usize;
+                std::thread::spawn(move || {
+                    if let Some(info) = updater::check_for_update(None) {
+                        let boxed = Box::new(info);
+                        unsafe {
+                            let _ = PostMessageW(
+                                Some(HWND(hwnd_raw as *mut _)),
+                                WM_UPDATE_AVAILABLE,
+                                WPARAM(0),
+                                LPARAM(Box::into_raw(boxed) as isize),
+                            );
+                        }
+                    } else {
+                        unsafe {
+                            MessageBoxW(
+                                None,
+                                w!("You're running the latest version."),
+                                w!("HyperXTools \u{2014} Update Check"),
+                                MB_OK | MB_ICONINFORMATION,
+                            );
+                        }
+                    }
+                });
             }
             ID_AUTOSTART => autostart::set_enabled(!autostart::is_enabled()),
             ID_EXIT => unsafe { PostQuitMessage(0) },
@@ -330,12 +365,7 @@ fn set_tooltip(nid: &mut NOTIFYICONDATAW, text: &str) {
 }
 
 /// Window procedure for the hidden tray message window.
-unsafe extern "system" fn wndproc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut TrayIcon;
     if ptr.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
@@ -365,6 +395,37 @@ unsafe extern "system" fn wndproc(
         }
         WM_HID_CONNECTION => {
             tray.on_connection(wparam.0 != 0);
+            LRESULT(0)
+        }
+        WM_UPDATE_AVAILABLE => {
+            let info = unsafe { Box::from_raw(lparam.0 as *mut updater::UpdateInfo) };
+            match updater::show_update_dialog(&info) {
+                updater::UpdateChoice::UpdateNow => {
+                    match updater::download_and_replace(&info.download_url) {
+                        Ok(exe_path) => updater::relaunch_and_exit(&exe_path),
+                        Err(e) => {
+                            let msg = format!(
+                                "Update failed: {e}\n\nYou can download the update manually from GitHub."
+                            );
+                            let msg_w: Vec<u16> =
+                                msg.encode_utf16().chain(std::iter::once(0)).collect();
+                            unsafe {
+                                MessageBoxW(
+                                    Some(hwnd),
+                                    windows::core::PCWSTR(msg_w.as_ptr()),
+                                    w!("HyperXTools \u{2014} Update Error"),
+                                    MB_OK | MB_ICONERROR,
+                                );
+                            }
+                        }
+                    }
+                }
+                updater::UpdateChoice::SkipVersion => {
+                    tray.config.skipped_version = Some(info.version.clone());
+                    tray.config.save();
+                }
+                updater::UpdateChoice::RemindLater => {}
+            }
             LRESULT(0)
         }
         WM_DESTROY => {

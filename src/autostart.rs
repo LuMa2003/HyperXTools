@@ -10,13 +10,18 @@ pub fn is_enabled() -> bool {
     unsafe {
         let mut hkey = HKEY::default();
         let subkey = to_wide(RUN_KEY);
-        let result = RegOpenKeyExW(HKEY_CURRENT_USER, to_pcwstr(&subkey), None, KEY_READ, &mut hkey);
+        let result = RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            to_pcwstr(&subkey),
+            None,
+            KEY_READ,
+            &mut hkey,
+        );
         if result.is_err() {
             return false;
         }
         let name = to_wide(VALUE_NAME);
-        let exists =
-            RegQueryValueExW(hkey, to_pcwstr(&name), None, None, None, None).is_ok();
+        let exists = RegQueryValueExW(hkey, to_pcwstr(&name), None, None, None, None).is_ok();
         let _ = RegCloseKey(hkey);
         exists
     }
@@ -43,17 +48,9 @@ pub fn set_enabled(enable: bool) {
             if let Ok(exe_path) = std::env::current_exe() {
                 let path_str = exe_path.to_string_lossy();
                 let value = to_wide(&path_str);
-                let bytes: &[u8] = std::slice::from_raw_parts(
-                    value.as_ptr() as *const u8,
-                    value.len() * 2,
-                );
-                let _ = RegSetValueExW(
-                    hkey,
-                    to_pcwstr(&name),
-                    None,
-                    REG_SZ,
-                    Some(bytes),
-                );
+                let bytes: &[u8] =
+                    std::slice::from_raw_parts(value.as_ptr() as *const u8, value.len() * 2);
+                let _ = RegSetValueExW(hkey, to_pcwstr(&name), None, REG_SZ, Some(bytes));
             }
         } else {
             let _ = RegDeleteValueW(hkey, to_pcwstr(&name));
@@ -64,7 +61,10 @@ pub fn set_enabled(enable: bool) {
 
 /// Converts a &str to a null-terminated wide string (Vec<u16>).
 fn to_wide(s: &str) -> Vec<u16> {
-    OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// Creates a PCWSTR from a null-terminated wide string slice.

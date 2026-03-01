@@ -1,11 +1,11 @@
 //! Modal Win32 dialog for selecting the user's main microphone.
 
-use windows::core::w;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::w;
 
 use crate::audio::{self, AudioDevice};
 
@@ -30,7 +30,10 @@ pub fn show_mic_picker() -> Option<AudioDevice> {
     debug_log!("[mic_picker] COM initialized");
 
     let devices = audio::enumerate_input_devices();
-    debug_log!("[mic_picker] got {} device(s) from enumerate_input_devices", devices.len());
+    debug_log!(
+        "[mic_picker] got {} device(s) from enumerate_input_devices",
+        devices.len()
+    );
     for (i, d) in devices.iter().enumerate() {
         debug_log!("[mic_picker]   [{}] name={:?} id={:?}", i, d.name, d.id);
     }
@@ -103,7 +106,12 @@ pub fn show_mic_picker() -> Option<AudioDevice> {
             None,
         );
         if let Ok(label) = label {
-            SendMessageW(label, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
+            SendMessageW(
+                label,
+                WM_SETFONT,
+                Some(WPARAM(font.0 as usize)),
+                Some(LPARAM(1)),
+            );
         }
 
         // Listbox
@@ -123,18 +131,32 @@ pub fn show_mic_picker() -> Option<AudioDevice> {
         );
         if let Ok(listbox) = listbox {
             debug_log!("[mic_picker] listbox created OK");
-            SendMessageW(listbox, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
+            SendMessageW(
+                listbox,
+                WM_SETFONT,
+                Some(WPARAM(font.0 as usize)),
+                Some(LPARAM(1)),
+            );
 
             // Populate listbox
             for (i, device) in devices.iter().enumerate() {
-                let wide: Vec<u16> = device.name.encode_utf16().chain(std::iter::once(0)).collect();
+                let wide: Vec<u16> = device
+                    .name
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
                 let result = SendMessageW(
                     listbox,
                     LB_ADDSTRING,
                     Some(WPARAM(0)),
                     Some(LPARAM(wide.as_ptr() as isize)),
                 );
-                debug_log!("[mic_picker] LB_ADDSTRING [{}] {:?} -> result={}", i, device.name, result.0);
+                debug_log!(
+                    "[mic_picker] LB_ADDSTRING [{}] {:?} -> result={}",
+                    i,
+                    device.name,
+                    result.0
+                );
             }
         } else {
             debug_log!("[mic_picker] ERROR: failed to create listbox");
@@ -156,7 +178,12 @@ pub fn show_mic_picker() -> Option<AudioDevice> {
             None,
         );
         if let Ok(ok_btn) = ok_btn {
-            SendMessageW(ok_btn, WM_SETFONT, Some(WPARAM(font.0 as usize)), Some(LPARAM(1)));
+            SendMessageW(
+                ok_btn,
+                WM_SETFONT,
+                Some(WPARAM(font.0 as usize)),
+                Some(LPARAM(1)),
+            );
         }
 
         // Cancel button
@@ -283,14 +310,25 @@ unsafe fn accept_selection(hwnd: HWND, state_ptr: *mut PickerState) {
     unsafe {
         if let Ok(listbox) = GetDlgItem(Some(hwnd), ID_LISTBOX) {
             let index = SendMessageW(listbox, LB_GETCURSEL, None, None);
-            debug_log!("[mic_picker] accept_selection: LB_GETCURSEL index={}", index.0);
+            debug_log!(
+                "[mic_picker] accept_selection: LB_GETCURSEL index={}",
+                index.0
+            );
             if index.0 >= 0 {
                 let state = &mut *state_ptr;
                 if let Some(device) = state.devices.get(index.0 as usize) {
-                    debug_log!("[mic_picker] accepted: name={:?} id={:?}", device.name, device.id);
+                    debug_log!(
+                        "[mic_picker] accepted: name={:?} id={:?}",
+                        device.name,
+                        device.id
+                    );
                     state.selected = Some(device.clone());
                 } else {
-                    debug_log!("[mic_picker] ERROR: index {} out of bounds (len={})", index.0, state.devices.len());
+                    debug_log!(
+                        "[mic_picker] ERROR: index {} out of bounds (len={})",
+                        index.0,
+                        state.devices.len()
+                    );
                 }
             } else {
                 debug_log!("[mic_picker] no selection (index < 0)");

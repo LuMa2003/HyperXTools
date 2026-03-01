@@ -1,8 +1,8 @@
 use std::mem;
-use windows::core::Result;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::Result;
 
 const ICON_SIZE: i32 = 16;
 
@@ -51,11 +51,7 @@ pub fn render_disconnected_icon() -> Result<HICON> {
     render_icon((128, 128, 128), None, 0)
 }
 
-fn render_icon(
-    outline: (u8, u8, u8),
-    fill: Option<(u8, u8, u8)>,
-    fill_cols: i32,
-) -> Result<HICON> {
+fn render_icon(outline: (u8, u8, u8), fill: Option<(u8, u8, u8)>, fill_cols: i32) -> Result<HICON> {
     unsafe {
         let screen_dc = GetDC(None);
         let mem_dc = CreateCompatibleDC(Some(screen_dc));
@@ -74,8 +70,7 @@ fn render_icon(
             ..Default::default()
         };
         let mut bits = std::ptr::null_mut();
-        let color_bmp =
-            CreateDIBSection(Some(mem_dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0)?;
+        let color_bmp = CreateDIBSection(Some(mem_dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0)?;
 
         let buf = bits as *mut u8;
 
@@ -100,8 +95,7 @@ fn render_icon(
 
         // Monochrome mask — all zeros lets the 32bpp alpha channel control transparency
         let mask_data = [0u8; 32]; // 16 rows x 2 bytes/row (1bpp, WORD-aligned)
-        let mask_bmp =
-            CreateBitmap(ICON_SIZE, ICON_SIZE, 1, 1, Some(mask_data.as_ptr().cast()));
+        let mask_bmp = CreateBitmap(ICON_SIZE, ICON_SIZE, 1, 1, Some(mask_data.as_ptr().cast()));
 
         let icon_info = ICONINFO {
             fIcon: TRUE,

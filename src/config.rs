@@ -17,6 +17,9 @@ pub struct Config {
     /// Friendly name of the user's main mic (for display).
     #[serde(default)]
     pub main_mic_name: Option<String>,
+    /// Version the user chose to skip (auto-update won't prompt again for this version).
+    #[serde(default)]
+    pub skipped_version: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -30,6 +33,7 @@ impl Default for Config {
             mic_switching: false,
             main_mic_id: None,
             main_mic_name: None,
+            skipped_version: None,
         }
     }
 }
