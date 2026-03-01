@@ -34,8 +34,8 @@ pub fn show_mic_picker() -> Option<AudioDevice> {
         "[mic_picker] got {} device(s) from enumerate_input_devices",
         devices.len()
     );
-    for (i, d) in devices.iter().enumerate() {
-        debug_log!("[mic_picker]   [{}] name={:?} id={:?}", i, d.name, d.id);
+    for (_i, _d) in devices.iter().enumerate() {
+        debug_log!("[mic_picker]   [{}] name={:?} id={:?}", _i, _d.name, _d.id);
     }
 
     if devices.is_empty() {
@@ -139,13 +139,13 @@ pub fn show_mic_picker() -> Option<AudioDevice> {
             );
 
             // Populate listbox
-            for (i, device) in devices.iter().enumerate() {
+            for (_i, device) in devices.iter().enumerate() {
                 let wide: Vec<u16> = device
                     .name
                     .encode_utf16()
                     .chain(std::iter::once(0))
                     .collect();
-                let result = SendMessageW(
+                let _result = SendMessageW(
                     listbox,
                     LB_ADDSTRING,
                     Some(WPARAM(0)),
@@ -153,9 +153,9 @@ pub fn show_mic_picker() -> Option<AudioDevice> {
                 );
                 debug_log!(
                     "[mic_picker] LB_ADDSTRING [{}] {:?} -> result={}",
-                    i,
+                    _i,
                     device.name,
-                    result.0
+                    _result.0
                 );
             }
         } else {

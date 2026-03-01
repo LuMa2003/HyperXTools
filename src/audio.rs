@@ -87,8 +87,8 @@ pub fn enumerate_input_devices() -> Vec<AudioDevice> {
                     CoTaskMemFree(Some(id_ptr.0 as *const _));
                     id_str
                 }
-                Err(e) => {
-                    debug_log!("[audio] ERROR: GetId failed for device {}: {:?}", i, e);
+                Err(_e) => {
+                    debug_log!("[audio] ERROR: GetId failed for device {}: {:?}", i, _e);
                     continue;
                 }
             };
@@ -104,20 +104,20 @@ pub fn enumerate_input_devices() -> Vec<AudioDevice> {
                             pwstr_to_string(PWSTR(pwstr.0))
                         }
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         debug_log!(
                             "[audio] ERROR: GetValue(FriendlyName) failed for device {}: {:?}",
                             i,
-                            e
+                            _e
                         );
                         String::new()
                     }
                 },
-                Err(e) => {
+                Err(_e) => {
                     debug_log!(
                         "[audio] ERROR: OpenPropertyStore failed for device {}: {:?}",
                         i,
-                        e
+                        _e
                     );
                     String::new()
                 }
