@@ -184,12 +184,16 @@ pub fn switch_mic_on_mute(muted: bool, main_mic_id: &str, hyperx_mic_id: &str) {
     }
 }
 
-/// RAII guard that calls `CoUninitialize` on drop.
-pub struct ComGuard;
+/// RAII guard that calls `CoUninitialize` on drop when COM was successfully initialized.
+pub struct ComGuard {
+    needs_uninit: bool,
+}
 
 impl Drop for ComGuard {
     fn drop(&mut self) {
-        unsafe { CoUninitialize() };
+        if self.needs_uninit {
+            unsafe { CoUninitialize() };
+        }
     }
 }
 
@@ -197,9 +201,15 @@ impl Drop for ComGuard {
 /// Hold the returned guard for the duration of COM usage on this thread.
 pub fn init_com() -> ComGuard {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // S_OK (first init) and S_FALSE (already init'd, refcount incremented)
+        // both require a matching CoUninitialize. Errors (e.g. RPC_E_CHANGED_MODE) do not.
+        let needs_uninit = hr.is_ok();
+        if !needs_uninit {
+            debug_log!("[audio] CoInitializeEx failed: {:?}", hr);
+        }
+        ComGuard { needs_uninit }
     }
-    ComGuard
 }
 
 /// Converts a PWSTR to a Rust String.
